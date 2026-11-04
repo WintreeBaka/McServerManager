@@ -17,7 +17,7 @@
 #>
 param(
     [string]$Version = "1.1.1",
-    [string]$Repo = "WintreeBaka/mc-server-manager",
+    [string]$Repo = "WintreeBaka/McServerManager",
     [string]$Tag = "",
     [string]$Title = "",
     [string]$NotesFile = "",

@@ -7,7 +7,7 @@
   "scope": "frontend",
   "description": "最小可用的前端扩展插件：注册一个页面，展示表格与按钮，并订阅事件刷新。",
   "author": "McServerManager",
-  "homepage": "https://github.com/WintreeBaka/mc-server-manager",
+  "homepage": "https://github.com/WintreeBaka/McServerManager",
   "license": "MIT",
   "permissions": ["ui.pages", "servers.read"],
   "frontend": {
