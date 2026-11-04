@@ -43,12 +43,34 @@ jobs:
           windeployqt --release --no-translations build\bin\mcsm-cli.exe
           windeployqt --release --no-translations build\bin\McServerManager.exe
 
+          # MinGW runtime DLLs (libstdc++/libgcc/libwinpthread) are not copied by
+          # windeployqt; without them the exe silently fails to start on the runner.
+          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+          if ($mingw) {
+            foreach ($dll in @('libstdc++-6.dll','libgcc_s_seh-1.dll','libwinpthread-1.dll')) {
+              $src = Join-Path $mingw.FullName $dll
+              if (Test-Path $src) { Copy-Item $src build\bin -Force }
+            }
+            Write-Host "MinGW runtime: $($mingw.FullName)"
+          } else {
+            Write-Warning "MinGW toolchain not found under Qt\Tools"
+          }
+          Get-ChildItem build\bin\*.dll | Select-Object -ExpandProperty Name
+
       - name: Source consistency check
         run: python tools/static_check.py
 
       - name: Backend smoke test
         shell: pwsh
-        run: ./tools/smoke-test.ps1 -Exe ./build/bin/mcsm-cli.exe
+        run: |
+          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+          if ($mingw) { $env:PATH = "$($mingw.FullName);$env:QT_ROOT_DIR\bin;$env:PATH" }
+          Write-Host "--- diagnostic ---"
+          & .\build\bin\mcsm-cli.exe version
+          Write-Host "exit=$LASTEXITCODE"
+          ./tools/smoke-test.ps1 -Exe ./build/bin/mcsm-cli.exe
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
