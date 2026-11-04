@@ -34,6 +34,15 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Deploy Qt runtime
+        shell: pwsh
+        # install-qt-action only exports QT_ROOT_DIR (not PATH), so both the
+        # smoke test and the uploaded artifact need the DLLs next to the exes.
+        run: |
+          $env:PATH = "$env:QT_ROOT_DIR\bin;$env:PATH"
+          windeployqt --release --no-translations build\bin\mcsm-cli.exe
+          windeployqt --release --no-translations build\bin\McServerManager.exe
+
       - name: Source consistency check
         run: python tools/static_check.py
 
