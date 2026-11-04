@@ -27,7 +27,7 @@ jobs:
           # Qt 6.6.3's MinGW build must be compiled with the matching toolchain;
           # the runner's own gcc produced binaries that crashed with
           # STATUS_HEAP_CORRUPTION at startup (libstdc++ ABI mismatch).
-          tools: 'qt.tools.win64_mingw1120,11.2.0,win64'
+          tools: 'qt.tools.win64_mingw1120,11.2.0'
           # Qt 6's win64_mingw base package already contains qtdeclarative
           # (QJSEngine). Listing it as a module makes aqt fail with
           # "packages ['qtdeclarative'] were not found".
