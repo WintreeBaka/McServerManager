@@ -24,34 +24,23 @@ jobs:
           version: ${{ matrix.qt }}
           arch: win64_mingw
           cache: true
+          # Qt 6.6.3's MinGW build must be compiled with the matching toolchain;
+          # the runner's own gcc produced binaries that crashed with
+          # STATUS_HEAP_CORRUPTION at startup (libstdc++ ABI mismatch).
+          tools: 'qt.tools.win64_mingw1120,11.2.0,win64'
           # Qt 6's win64_mingw base package already contains qtdeclarative
           # (QJSEngine). Listing it as a module makes aqt fail with
           # "packages ['qtdeclarative'] were not found".
 
       - name: Configure
         shell: pwsh
-        # Use the MinGW toolchain that ships with the Qt kit. Letting CMake pick
-        # whatever gcc is on the runner produced a binary whose libstdc++ did not
-        # match the runtime DLLs (STATUS_HEAP_CORRUPTION at startup).
         run: |
-          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction Stop |
-                   Select-Object -First 1
-          if (-not $mingw) { throw "Qt MinGW toolchain not found under $env:QT_ROOT_DIR\..\..\Tools" }
-          $env:PATH = "$($mingw.FullName);$env:QT_ROOT_DIR\bin;$env:PATH"
-          Write-Host "toolchain: $($mingw.FullName)"
-          & "$($mingw.FullName)\g++.exe" --version | Select-Object -First 1
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
-                -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
-                -DCMAKE_C_COMPILER="$($mingw.FullName)\gcc.exe" `
-                -DCMAKE_CXX_COMPILER="$($mingw.FullName)\g++.exe"
+          Write-Host "gcc: $((Get-Command gcc).Source)"
+          gcc --version | Select-Object -First 1
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        shell: pwsh
-        run: |
-          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction Stop |
-                   Select-Object -First 1
-          $env:PATH = "$($mingw.FullName);$env:QT_ROOT_DIR\bin;$env:PATH"
-          cmake --build build --parallel
+        run: cmake --build build --parallel
 
       - name: Deploy Qt runtime
         shell: pwsh
@@ -63,8 +52,8 @@ jobs:
           windeployqt --release --no-translations build\bin\McServerManager.exe
 
           # MinGW runtime DLLs (libstdc++/libgcc/libwinpthread) are not copied by
-          # windeployqt. Copy the ones matching the compiler used above.
-          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction SilentlyContinue |
+          # windeployqt; take them from the matching MinGW 11.2 toolchain.
+          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw1120_64\bin" -Directory -ErrorAction SilentlyContinue |
                    Select-Object -First 1
           if ($mingw) {
             foreach ($dll in @('libstdc++-6.dll','libgcc_s_seh-1.dll','libwinpthread-1.dll')) {
@@ -83,7 +72,7 @@ jobs:
       - name: Backend smoke test
         shell: pwsh
         run: |
-          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction SilentlyContinue |
+          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw1120_64\bin" -Directory -ErrorAction SilentlyContinue |
                    Select-Object -First 1
           if ($mingw) { $env:PATH = "$($mingw.FullName);$env:QT_ROOT_DIR\bin;$env:PATH" }
           Write-Host "--- diagnostic ---"
