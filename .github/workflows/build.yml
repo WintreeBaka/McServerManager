@@ -24,8 +24,9 @@ jobs:
           version: ${{ matrix.qt }}
           arch: win64_mingw
           cache: true
-          # QJSEngine lives in Qt Declarative; the plugin host needs it
-          modules: 'qtdeclarative'
+          # Qt 6's win64_mingw base package already contains qtdeclarative
+          # (QJSEngine). Listing it as a module makes aqt fail with
+          # "packages ['qtdeclarative'] were not found".
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
