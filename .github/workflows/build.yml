@@ -29,10 +29,29 @@ jobs:
           # "packages ['qtdeclarative'] were not found".
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        shell: pwsh
+        # Use the MinGW toolchain that ships with the Qt kit. Letting CMake pick
+        # whatever gcc is on the runner produced a binary whose libstdc++ did not
+        # match the runtime DLLs (STATUS_HEAP_CORRUPTION at startup).
+        run: |
+          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction Stop |
+                   Select-Object -First 1
+          if (-not $mingw) { throw "Qt MinGW toolchain not found under $env:QT_ROOT_DIR\..\..\Tools" }
+          $env:PATH = "$($mingw.FullName);$env:QT_ROOT_DIR\bin;$env:PATH"
+          Write-Host "toolchain: $($mingw.FullName)"
+          & "$($mingw.FullName)\g++.exe" --version | Select-Object -First 1
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+                -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
+                -DCMAKE_C_COMPILER="$($mingw.FullName)\gcc.exe" `
+                -DCMAKE_CXX_COMPILER="$($mingw.FullName)\g++.exe"
 
       - name: Build
-        run: cmake --build build --parallel
+        shell: pwsh
+        run: |
+          $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction Stop |
+                   Select-Object -First 1
+          $env:PATH = "$($mingw.FullName);$env:QT_ROOT_DIR\bin;$env:PATH"
+          cmake --build build --parallel
 
       - name: Deploy Qt runtime
         shell: pwsh
@@ -44,7 +63,7 @@ jobs:
           windeployqt --release --no-translations build\bin\McServerManager.exe
 
           # MinGW runtime DLLs (libstdc++/libgcc/libwinpthread) are not copied by
-          # windeployqt; without them the exe silently fails to start on the runner.
+          # windeployqt. Copy the ones matching the compiler used above.
           $mingw = Get-ChildItem "$env:QT_ROOT_DIR\..\..\Tools\mingw*\bin" -Directory -ErrorAction SilentlyContinue |
                    Select-Object -First 1
           if ($mingw) {
