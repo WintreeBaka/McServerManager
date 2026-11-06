@@ -546,6 +546,19 @@ if (-not $zipTool) {
     Write-Result "插件目录外的安装被拒绝" `
         ((Invoke-Cli @("plugin", "package", "install", "--zip", $frontZip, "--expect", "../evil") -AllowFailure).ok -eq $false) `
         "expected an id mismatch / unsafe path rejection"
+
+    # -------------------------------------------------- official plugin -------
+    $officialDir = Join-Path (Split-Path -Parent $PSScriptRoot) "plugins\official\player-admin"
+    if (Test-Path (Join-Path $officialDir "plugin.json")) {
+        $officialZip = Join-Path $Assets "official-player-admin.zip"
+        Push-Location $officialDir
+        try { & $zipTool a -tzip $officialZip "." -y -bso0 -bsp0 | Out-Null } finally { Pop-Location }
+        $official = Invoke-Cli @("plugin", "package", "inspect", "--zip", $officialZip)
+        Write-Result "official player-admin package is valid" `
+            ($official.ok -and $official.data.scope -eq "global" -and $official.data.apiVersion -eq 1 `
+                -and $official.data.hasFrontend -and $official.data.hasBackend) `
+            ("scope=" + $official.data.scope + " api=" + $official.data.apiVersion)
+    }
 }
 
 # ----------------------------------------------------------------- cleanup ----

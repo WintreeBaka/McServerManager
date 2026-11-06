@@ -1,6 +1,6 @@
 # McServerManager 插件接口说明（Plugin SDK）
 
-版本：**apiVersion 1** · 适用于 McServerManager 1.1.1 及以上
+版本：**apiVersion 1** · 适用于 McServerManager 1.1.2 及以上
 
 本文档描述 McServerManager 的**插件包（plugin package）**机制：如何打包、导入、启用，以及
 前端（桌面界面）、后端（CLI 能力）、支持库 / Web 面板三类扩展分别可以调用哪些接口。
@@ -202,7 +202,7 @@ my-plugin-1.0.0.zip
   "apiVersion": 1,
   "supportedMinApi": 1,
   "supportedMaxApi": 1,
-  "managerVersion": "1.1.1",
+  "managerVersion": "1.1.2",
   "apiVersionPolicy": {
     "type": "integer",
     "bumpOn": "每增加一批新接口 +1",
@@ -236,7 +236,7 @@ my-plugin-1.0.0.zip
 
 | 属性 | 说明 |
 | --- | --- |
-| `mcsm.version` | 管理器版本，如 `1.1.1` |
+| `mcsm.version` | 管理器版本，如 `1.1.2` |
 | `mcsm.apiVersion` | 当前接口级别（整数，如 `1`） |
 | `mcsm.plugin.id / .name / .version / .scope / .path` | 当前插件信息 |
 
@@ -608,7 +608,7 @@ mcsm-cli plugin api --pretty
   "apiVersion": 1,
   "supportedMinApi": 1,
   "supportedMaxApi": 1,
-  "managerVersion": "1.1.1",
+  "managerVersion": "1.1.2",
   "apiVersionPolicy": {
     "type": "integer",
     "bumpOn": "每增加一批新接口 +1",

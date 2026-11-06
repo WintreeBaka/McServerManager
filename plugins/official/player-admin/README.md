@@ -3,7 +3,7 @@
 给 McServerManager 增加一块「玩家管理」页面：对**当前选中的服务器**管理白名单、
 黑名单（封禁）与 OP 管理员名单，并执行踢出、封禁、标题、私信、游戏模式等玩家操作。
 
-> 需要 McServerManager **1.1.1 或更高**（插件接口 `apiVersion: 1`）。
+> 需要 McServerManager **1.1.2 或更高**（插件接口 `apiVersion: 1`）。
 > 源码位置：`plugins/official/player-admin/`。
 
 ## 功能
@@ -78,7 +78,7 @@ build\bin\mcsm-cli.exe plugin package install --zip dist\plugins\com.mcsm.player
 * **刷新**：插件收不到定时事件，但管理器约每 20 秒会派发 `environment.changed`，
   页面借此重新拉取快照，只有内容真的变了才重绘（重绘会清空输出框）。
 * **按钮色调**：插件页面的按钮样式由管理器的 `PluginPageView` 决定，`buttons.items[].level`
-  取值 `primary`（默认）/ `outline` / `soft` / `danger`。管理器 1.1.1 之前只会区分 `danger`，
+  取值 `primary`（默认）/ `outline` / `soft` / `danger`。管理器 1.1.1 之前只会区分 `danger`，1.1.2 起完整支持 `level`，
   其余一律画成半透明的 Soft（深色主题下看起来像禁用），该问题已在管理器侧修正。
 * **参数安全**：玩家名只允许 `A-Za-z0-9_`（1–16 位），理由 / 标题 / 私信会去掉换行并限制长度，
   避免通过 RCON 拼接执行第二条指令。

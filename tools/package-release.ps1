@@ -7,7 +7,7 @@
     Usage:
         .\tools\package-release.ps1
         .\tools\package-release.ps1 -Flavor with-plugins      # 追加示例插件包，名字带后缀
-        .\tools\package-release.ps1 -Version 1.1.1 -DistDir dist
+        .\tools\package-release.ps1 -Version 1.1.2 -DistDir dist
 
     Two flavours exist and they deliberately get **different** folder names so the
     "plain" build never overwrites the one that ships the example plugin packages:
@@ -18,7 +18,7 @@
 param(
     [string]$BinDir = "build\bin",
     [string]$DistDir = "dist",
-    [string]$Version = "1.1.1",
+    [string]$Version = "1.1.2",
     [ValidateSet("plain", "with-plugins")]
     [string]$Flavor = "plain"
 )

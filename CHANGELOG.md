@@ -1,5 +1,38 @@
 # 更新日志
 
+## 1.1.2
+
+### 首个官方插件：玩家管理（player-admin）
+
+* 源码：[`plugins/official/player-admin`](plugins/official/player-admin/)，作用域 `global`（前端页面 + 后端）。
+* 页面：白名单 / 封禁 / OP 名单用表格展示；在线玩家与已知玩家按「一人一行」排列操作按钮，
+  不再需要在成排按钮里横向找玩家。
+* 操作：踢出、封禁、解封、设为 / 取消 OP、加入 / 移出白名单、开启 / 关闭 / 重载白名单、
+  发送标题（含副标题）、私信、切换游戏模式、击杀、全服广播。
+* 数据来源：服务器运行时走 RCON（服务端自己写名单，正版 UUID 正确）；
+  未运行时退化为直接写 `whitelist.json` / `ops.json` / `banned-players.json` 并给出提示。
+* 文案：标题、踢出/封禁理由、私信内容放在插件数据目录的 `texts.json`，改完约 20 秒生效。
+* 打包：`plugins/build-plugins.ps1` 输出到 `dist/plugins/`，可直接在「设置 → 插件扩展」导入。
+
+### 界面
+
+* 插件页面按钮现在支持 `buttons.items[].level`：`primary`（默认）/ `outline`（可写 `ghost`）/
+  `soft` / `danger`。此前所有插件按钮固定为半透明 Soft，深色主题下看起来像禁用状态。
+* `docs/PLUGIN-SDK.md` 同步说明按钮色调取值。
+
+### 插件安全与兼容
+
+* 玩家名只允许 `A-Za-z0-9_`（1–16 位），理由 / 标题 / 私信会去掉换行并限制长度，
+  防止通过 RCON 拼接执行第二条指令。
+* 修复插件在 Windows 上没有管理器传入路径时使用 Roaming 目录的问题（改为 `LOCALAPPDATA`）。
+* `player-admin` 声明 `minManagerVersion: 1.1.2`（1.1.1 可运行，但按钮色调不完整）。
+
+### 测试
+
+* `tools/smoke-test.ps1` 增加「官方插件包必须有效」用例：**68 项全部通过**。
+* 实测官方插件：包校验 `global` + `apiVersion 1`；`health` / `dashboard` / `act` 离线写名单；
+  非法玩家名与换行注入均被拒绝；本机安装后页面正常渲染。
+
 ## 1.1.1
 
 ### 接口版本（apiVersion）改为整数区间

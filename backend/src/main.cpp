@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("mcsm-cli"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.1.1"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("1.1.2"));
     QCoreApplication::setOrganizationName(QStringLiteral("McServerManager"));
 
     // Global flags are parsed manually so that command specific flags can be

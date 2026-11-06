@@ -3,7 +3,7 @@
   "name": "玩家管理",
   "version": "1.0.0",
   "apiVersion": 1,
-  "minManagerVersion": "1.1.1",
+  "minManagerVersion": "1.1.2",
   "scope": "global",
   "description": "为选中的服务器提供玩家管理：白名单 / 黑名单（封禁）/ OP 管理员名单，以及在线玩家与已知玩家的踢出、封禁、标题、私信、游戏模式等操作；页面按玩家分行排列，文案可在插件数据目录的 texts.json 中修改。",
   "author": "McServerManager",

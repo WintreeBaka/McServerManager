@@ -184,7 +184,7 @@ int PackageManager::supportedMaxApi()
 QString PackageManager::managerVersion()
 {
     const QString version = QCoreApplication::applicationVersion();
-    return version.isEmpty() ? QStringLiteral("1.1.1") : version;
+    return version.isEmpty() ? QStringLiteral("1.1.2") : version;
 }
 
 bool PackageManager::isSafePluginPath(const QString &relative)

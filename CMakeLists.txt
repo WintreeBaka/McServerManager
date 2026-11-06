@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 project(McServerManager
-    VERSION 1.1.1
+    VERSION 1.1.2
     DESCRIPTION "Minecraft server manager (Docker based) with Qt frontend and CLI backend"
     LANGUAGES CXX)
 
