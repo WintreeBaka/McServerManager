@@ -219,7 +219,6 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
             if (label.isEmpty())
                 continue;
             auto *button = new GradientButton(label, row);
-            button->setStyle(GradientButton::Soft);
             button->setCompact(true);
             const QString glyph = item.value(QStringLiteral("icon")).toString();
             if (!glyph.isEmpty())
@@ -228,9 +227,18 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
             const QString url = item.value(QStringLiteral("url")).toString();
             const QString toast = item.value(QStringLiteral("toast")).toString();
             const QString openUrlField = item.value(QStringLiteral("openUrlFrom")).toString();
-            const QString tone = item.value(QStringLiteral("level")).toString();
+            // level: primary (default) / outline (ghost) / soft / danger.
+            // The old hard-coded Soft was nearly transparent in dark mode, so
+            // plugin buttons looked disabled and authors had no way to fix it.
+            const QString tone = item.value(QStringLiteral("level")).toString().trimmed().toLower();
             if (tone == QLatin1String("danger"))
                 button->setStyle(GradientButton::Danger);
+            else if (tone == QLatin1String("soft"))
+                button->setStyle(GradientButton::Soft);
+            else if (tone == QLatin1String("outline") || tone == QLatin1String("ghost"))
+                button->setStyle(GradientButton::Outline);
+            else
+                button->setStyle(GradientButton::Primary);
             connect(button, &QPushButton::clicked, this, [this, command, url, toast, openUrlField]() {
                 if (!url.isEmpty()) {
                     QDesktopServices::openUrl(QUrl(url));

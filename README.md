@@ -66,6 +66,10 @@
 导入入口：**设置 → 插件扩展 → 添加插件**；命令行等价入口为 `mcsm-cli plugin package …`。
 解压使用随包内置的 7-Zip，目标机器无需安装压缩软件。详见 [`docs/PLUGIN-SDK.md`](docs/PLUGIN-SDK.md)。
 
+首批官方插件：[`plugins/official/player-admin`](plugins/official/player-admin/) —— 玩家管理页面，
+管理白名单 / 封禁 / OP 名单，并对在线或已知玩家执行踢出、标题、私信、游戏模式等操作
+（源码在仓库内，`plugins/build-plugins.ps1` 可直接打包）。
+
 **界面**
 
 - 暗黑 / 亮色主题，马卡龙粉-蓝配色，可切换**渐变**与**纯色简洁**两种风格

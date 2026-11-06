@@ -274,7 +274,7 @@ mcsm.ui.openPage(pageId);   // 让管理器跳转到该页面
 | `text` | `text`, `style`(`hint` / `caption` / `subtitle`) | 段落文本 |
 | `keyvalue` | `items: [["键","值"], ...]` 或 `[{key,value}]` | 键值表 |
 | `table` | `title`, `columns: []`, `rows: [[...]]` | 表格 |
-| `buttons` | `items: [{label, icon, command, url, openUrlFrom, toast, level}]` | 按钮行 |
+| `buttons` | `items: [{label, icon, command, url, openUrlFrom, toast, level}]`，`level` 取 `primary`（默认）/ `outline`（可写 `ghost`）/ `soft` / `danger` | 按钮行 |
 | `log` | `title`, `text` | 控制台风格输出框（按钮执行结果也会写进这里） |
 | `html` | `html` | 富文本片段（Qt 富文本子集） |
 | `divider` | 无 | 分隔线 |
