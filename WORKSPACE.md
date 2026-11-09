@@ -18,7 +18,7 @@
 | 远端 | 地址 | 用途 |
 | --- | --- | --- |
 | `origin` | `git@github.com:WintreeBaka/McServerManager.git` | 主仓库（GitHub） |
-| `gitea`（待添加） | `git@gitea:w/McServerManager.git`（或 HTTP `http://192.168.1.82:3000/w/McServerManager`） | 个人 Gitea（SSH 端口 222） |
+| `gitea` | `git@gitea:w/McServerManager.git`（SSH 端口 222；Web/API `http://192.168.1.82:3000`） | 个人 Gitea；**仓库尚未创建**（该实例已禁用 push-to-create） |
 | `legacy` | `git@github.com:WintreeBaka/mc-server-manager.git` | 旧仓库，**已归档**；push 已禁用 |
 
 同步说法：
@@ -29,6 +29,9 @@
 
 > Gitea 的 API 在 `http://192.168.1.82:3000/api/v1`（Web/API 端口 3000，SSH 222）。
 > 建库 / 发 Release 需要 Gitea 访问令牌（`write:repository` + `write:package` 或对应仓库权限）。
+> 当前状态：SSH 认证为 `w` 正常，但 `w/McServerManager` 还没有创建，且
+> `Push to create is not enabled for users`；需要先在 Gitea Web 新建空仓库
+> `w/McServerManager`（或在 API 用令牌 POST `/api/v1/user/repos`），之后才能 `git push gitea`。
 
 ## 3. 必需环境
 
