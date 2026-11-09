@@ -104,8 +104,6 @@
 
 两者都不需要安装 Qt 或 Java。
 
-> 新工作区 / 新协作者请先读 [`WORKSPACE.md`](WORKSPACE.md)（环境、构建、测试、打包、发布、同步全部流程）。
-
 ### 2. 安装 Docker Desktop
 
 服务器运行在容器里，所以必须先装好 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 并保持运行。
