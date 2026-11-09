@@ -21,6 +21,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Windows PowerShell 5.1 and PowerShell 7 both turn a native tool's stderr output into a
+# terminating error while ErrorActionPreference is Stop. CMake writes ordinary warnings
+# there ("Manually-specified variables were not used"), which used to abort the build right
+# after configure. The native calls at the end of this script therefore relax the
+# preference and use $LASTEXITCODE as the contract, so a warning stays a warning.
+
 function Find-QtKit {
     $roots = @("C:\Qt", "D:\Qt", "D:\qt", (Join-Path $env:USERPROFILE "Qt"))
     $candidates = @()
@@ -60,12 +66,11 @@ if ($isMinGwKit) {
     if ($mingw) {
         $mingwBin = Join-Path $mingw.FullName "bin"
         if (Test-Path (Join-Path $mingwBin "g++.exe")) {
-            # g++ needs its DLLs on PATH for cc1plus.exe; CMake needs absolute compilers
+            # g++ needs its DLLs on PATH for cc1plus.exe; CMake needs absolute compilers.
+            # Only the C++ compiler is passed: CMakeLists.txt enables CXX alone, and a
+            # CMAKE_C_COMPILER would only earn "Manually-specified variables were not used".
             $env:PATH = "$mingwBin;$env:PATH"
-            $compilerArgs = @(
-                "-DCMAKE_CXX_COMPILER=$(Join-Path $mingwBin 'g++.exe')",
-                "-DCMAKE_C_COMPILER=$(Join-Path $mingwBin 'gcc.exe')"
-            )
+            $compilerArgs = @("-DCMAKE_CXX_COMPILER=$(Join-Path $mingwBin 'g++.exe')")
             Write-Host "MinGW       : $mingwBin" -ForegroundColor DarkGray
         }
     } else {
@@ -107,24 +112,37 @@ $configureArgs = @("-S", ".", "-B", $BuildDir, "-DCMAKE_PREFIX_PATH=$QtDir", "-D
 if ($Generator) { $configureArgs += @("-G", $Generator) }
 $configureArgs += $compilerArgs
 
+# Native tools print warnings to stderr; see the note at the top of this file. Everything
+# from here on is judged by $LASTEXITCODE, never by what the tools wrote to stderr.
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+
 Write-Host ""
 Write-Host "==> configuring ($(if ($Generator) { $Generator } else { 'default generator' }), $Config)" -ForegroundColor Cyan
 & cmake @configureArgs
-if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+$configureExit = $LASTEXITCODE
 
 Write-Host "==> building" -ForegroundColor Cyan
 & cmake --build $BuildDir --parallel
-if ($LASTEXITCODE -ne 0) { throw "build failed" }
+$buildExit = $LASTEXITCODE
 
+$deployExit = 0
 if ($Deploy) {
     $windeployqt = Join-Path $QtDir "bin\windeployqt.exe"
     if (Test-Path $windeployqt) {
         Write-Host "==> deploying Qt runtime" -ForegroundColor Cyan
         & $windeployqt "--release" "--no-translations" (Join-Path $BuildDir "bin\McServerManager.exe")
+        $deployExit = $LASTEXITCODE
     } else {
         Write-Warning "windeployqt not found in $QtDir\bin"
     }
 }
+
+$ErrorActionPreference = $previousPreference
+
+if ($configureExit -ne 0) { throw "cmake configure failed" }
+if ($buildExit -ne 0) { throw "build failed" }
+if ($deployExit -ne 0) { throw "windeployqt failed" }
 
 Write-Host ""
 Write-Host "done:" -ForegroundColor Green
