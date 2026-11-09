@@ -1,0 +1,47 @@
+我的世界服务器管理器 1.1.3（Windows x64 CLI 精简版）
+================================================
+
+这是不含桌面界面的精简版：只包含 mcsm-cli.exe 及其运行库。
+所有能力与 GUI 版共用同一后端，适合脚本、CI、远程/无桌面环境。
+
+一、运行要求
+------------
+1. Windows 10 / 11 64 位。
+2. Docker Desktop（必需）。服务器的 JDK 运行环境在容器里，本机不需要装 Java。
+3. 首次创建服务器需要联网。
+
+二、快速开始
+------------
+  mcsm-cli.exe doctor
+  mcsm-cli.exe versions --type paper
+  mcsm-cli.exe install --name 生存服 --type paper --version 1.21.8 --memory 4G
+  mcsm-cli.exe server list
+  mcsm-cli.exe server start --id 生存服 --wait 120
+  mcsm-cli.exe server command --id 生存服 --command "say hi"
+  mcsm-cli.exe backup create --id 生存服 --note "更新前"
+  mcsm-cli.exe daemon --interval 60
+
+所有命令只向 stdout 输出 JSON；诊断信息走 stderr 与 logs/backend.log。
+加 --pretty 可得到缩进 JSON。
+
+三、管理器插件（Plugin SDK）
+----------------------------
+  mcsm-cli.exe plugin api
+  mcsm-cli.exe plugin packages
+  mcsm-cli.exe plugin package install --zip my-plugin-1.0.0.zip
+  mcsm-cli.exe plugin package install --url https://example.com/my-plugin-1.0.0.zip
+  mcsm-cli.exe plugin call --name com.example.my-plugin --method summary
+  mcsm-cli.exe plugin service start --name com.example.ops-console
+
+插件包解压使用随包内置的 7zip\7za.exe；安装目录固定为
+%LOCALAPPDATA%\McServerManager\plugins\，不会写到系统目录。
+完整接口见 docs\PLUGIN-SDK.md。
+
+四、数据目录
+------------
+默认：%LOCALAPPDATA%\McServerManager
+可用 --home <目录> 或环境变量 MCSM_HOME 覆盖。
+
+五、卸载
+--------
+删除本目录即可；如需清除服务器与配置，再删除 %LOCALAPPDATA%\McServerManager。

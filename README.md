@@ -96,8 +96,15 @@
 
 ### 1. 下载便携版
 
-到 [Releases](../../releases) 下载 `McServerManager-<版本>-win64.zip`，解压到任意目录即可，
-**不需要安装 Qt 或 Java**。
+到 [Releases](../../releases) 下载：
+
+* `McServerManager-<版本>-win64.zip` —— **含 GUI 的便携版**，解压到任意目录即可；
+* `McServerManager-<版本>-win64-cli.zip` —— **纯 CLI 精简版**（约 6.5 MB，只有 `mcsm-cli.exe`，
+  适合脚本 / 服务器 / 无桌面环境）。
+
+两者都不需要安装 Qt 或 Java。
+
+> 新工作区 / 新协作者请先读 [`WORKSPACE.md`](WORKSPACE.md)（环境、构建、测试、打包、发布、同步全部流程）。
 
 ### 2. 安装 Docker Desktop
 
@@ -230,10 +237,11 @@ python tools/host-runtime-check.py  # 实验性「本机 JDK」模式端到端�
 
 .\tools\package-release.ps1                       # 纯程序版
 .\tools\package-release.ps1 -Flavor with-plugins  # 额外带 plugin-packages\（示例插件 zip，可直接导入）
+.\tools\package-release.ps1 -Flavor cli           # 纯 CLI 精简版（无 Qt Widgets/Qml）
 ```
 
-两个风味刻意使用不同名字（`McServerManager-<版本>-win64` 与 `…-win64-with-plugins`），
-避免重新生成纯程序版时把带插件的测试包覆盖掉。
+三种风味刻意使用不同名字（`…-win64`、`…-win64-with-plugins`、`…-win64-cli`），
+避免互相覆盖。自 1.1.3 起，每个 Release 同时提供 **GUI 便携版**与 **CLI 精简版**。
 
 ## 开发提示
 

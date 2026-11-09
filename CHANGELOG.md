@@ -54,6 +54,13 @@
 * 日志“跟随输出”在高频输出时不再逐行重启动画，改为复用运行中的动画。
 * 清理 6 条编译警告（2 处 shadow、未使用的 `toJs()` 等）。
 
+### 发布物
+
+* 自 1.1.3 起每个 Release 同时提供两种包：
+  * `McServerManager-<版本>-win64.zip`：含 GUI 的便携版；
+  * `McServerManager-<版本>-cli-win64.zip`：纯 CLI 精简版（仅 Qt Core/Network，约 6.5 MB）。
+* `tools/package-release.ps1` 新增 `-Flavor cli`；`packaging/QUICKSTART-CLI.txt` 为 CLI 版上手说明。
+
 ## 1.1.2
 
 ### 首个官方插件：玩家管理（player-admin）
