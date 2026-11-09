@@ -21,6 +21,8 @@ shot-*.png
 v2-*.png
 *.tar.gz
 *.zip
+# the Sogou IME writes this into the cwd whenever a GUI window opens
+debug.log
 
 # Qt Creator
 *.autosave
