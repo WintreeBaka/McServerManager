@@ -132,11 +132,6 @@ QStringList argumentsFrom(const QJSValue &command)
     return QStringList();
 }
 
-QJSValue toJs(QJSEngine *engine, const QJsonValue &value)
-{
-    return engine->toScriptValue(value.toVariant());
-}
-
 } // namespace
 
 // -------------------------------------------------------------- PluginApi ----
@@ -364,6 +359,8 @@ void PluginHost::reload()
 
 void PluginHost::loadFrontendPlugins()
 {
+    // invalidate callbacks that still point at the engines being torn down
+    ++m_generation;
     m_pages.clear();
     m_pageContent.clear();
     m_errors.clear();
@@ -597,15 +594,20 @@ void PluginHost::invokeBackend(const QStringList &arguments, const QJSValue &cal
 {
     if (!m_backend || arguments.isEmpty())
         return;
-    m_backend->request(arguments, this, [callback, engine](const Reply &reply) {
+    const quint64 generation = m_generation;
+    QPointer<QJSEngine> engineGuard(engine);
+    m_backend->request(arguments, this, [callback, engineGuard, generation, this](const Reply &reply) {
+        // The plugin was reloaded/unloaded while the request was in flight:
+        // the engine (and the QJSValue callback) are gone.
+        if (generation != m_generation || !engineGuard)
+            return;
+        QJSEngine *liveEngine = engineGuard.data();
         if (!callback.isCallable())
             return;
-        if (!engine)
-            return;
-        QJSValue argument = engine->newObject();
+        QJSValue argument = liveEngine->newObject();
         argument.setProperty(QStringLiteral("ok"), reply.ok);
-        argument.setProperty(QStringLiteral("data"), engine->toScriptValue(reply.data.toVariantMap()));
-        argument.setProperty(QStringLiteral("warnings"), engine->toScriptValue(reply.warnings));
+        argument.setProperty(QStringLiteral("data"), liveEngine->toScriptValue(reply.data.toVariantMap()));
+        argument.setProperty(QStringLiteral("warnings"), liveEngine->toScriptValue(reply.warnings));
         argument.setProperty(QStringLiteral("error"), reply.ok ? QString() : reply.errorText());
         argument.setProperty(QStringLiteral("code"), reply.code);
         callback.call({argument});

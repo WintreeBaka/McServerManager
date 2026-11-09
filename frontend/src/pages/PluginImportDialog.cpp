@@ -216,7 +216,7 @@ void PluginImportDialog::inspect()
 
     AppContext::instance()->backend()->request(
         arguments, this, [this](const Reply &reply) {
-            const QJsonObject data = reply.data;
+            const QJsonObject pluginData = reply.data;
             if (!reply.ok) {
                 setBusy(false, QStringLiteral("校验未通过：%1").arg(reply.message.isEmpty()
                                                                        ? reply.errorText()
@@ -230,23 +230,23 @@ void PluginImportDialog::inspect()
                 QStringLiteral("id          : %1\n名称        : %2\n版本        : %3\n"
                                "作用域      : %4\n包含部分    : %5\n作者        : %6\n描述        : %7\n"
                                "解压工具    : %8")
-                    .arg(data.value(QStringLiteral("id")).toString(),
-                         data.value(QStringLiteral("name")).toString(),
-                         data.value(QStringLiteral("version")).toString(),
-                         data.value(QStringLiteral("scopeLabel")).toString(),
-                         [&data]() {
+                    .arg(pluginData.value(QStringLiteral("id")).toString(),
+                         pluginData.value(QStringLiteral("name")).toString(),
+                         pluginData.value(QStringLiteral("version")).toString(),
+                         pluginData.value(QStringLiteral("scopeLabel")).toString(),
+                         [&pluginData]() {
                              QStringList parts;
-                             for (const QJsonValue &value : data.value(QStringLiteral("parts")).toArray())
+                             for (const QJsonValue &value : pluginData.value(QStringLiteral("parts")).toArray())
                                  parts << value.toString();
                              return parts.isEmpty() ? QStringLiteral("-") : parts.join(QStringLiteral(" + "));
                          }(),
-                         data.value(QStringLiteral("author")).toString(),
-                         data.value(QStringLiteral("description")).toString(),
-                         data.value(QStringLiteral("extractor")).toString()));
+                         pluginData.value(QStringLiteral("author")).toString(),
+                         pluginData.value(QStringLiteral("description")).toString(),
+                         pluginData.value(QStringLiteral("extractor")).toString()));
 
-            const bool already = data.value(QStringLiteral("alreadyInstalled")).toBool();
+            const bool already = pluginData.value(QStringLiteral("alreadyInstalled")).toBool();
             m_scope->setText(QStringLiteral("✔ 识别为：%1%2")
-                                 .arg(data.value(QStringLiteral("scopeLabel")).toString(),
+                                 .arg(pluginData.value(QStringLiteral("scopeLabel")).toString(),
                                       already ? QStringLiteral("（已安装，覆盖需打开下方开关）")
                                               : QString()));
             if (already && !m_force->isChecked()) {
@@ -282,22 +282,22 @@ void PluginImportDialog::install()
             }
             m_installed = true;
             setBusy(false, QStringLiteral("✔ 安装完成"));
-            const QJsonObject data = reply.data;
+            const QJsonObject pluginData = reply.data;
             m_scope->setText(QStringLiteral("✔ 已安装：%1（%2）")
-                                 .arg(data.value(QStringLiteral("name")).toString(),
-                                      data.value(QStringLiteral("scopeLabel")).toString()));
+                                 .arg(pluginData.value(QStringLiteral("name")).toString(),
+                                      pluginData.value(QStringLiteral("scopeLabel")).toString()));
             QString text = m_details->toPlainText();
             text += QStringLiteral("\n\n安装位置    : %1\n文件数量    : %2")
-                        .arg(data.value(QStringLiteral("installedPath")).toString())
-                        .arg(data.value(QStringLiteral("fileCount")).toInt());
+                        .arg(pluginData.value(QStringLiteral("installedPath")).toString())
+                        .arg(pluginData.value(QStringLiteral("fileCount")).toInt());
             if (!reply.warnings.isEmpty())
                 text += QStringLiteral("\n提示        : %1").arg(reply.warnings.join(QStringLiteral("；")));
             m_details->setPlainText(text);
             m_closeButton->setText(QStringLiteral("完成"));
 
-            const QString id = data.value(QStringLiteral("id")).toString();
+            const QString id = pluginData.value(QStringLiteral("id")).toString();
             AppContext::instance()->logActivity(
-                QStringLiteral("已添加插件 %1").arg(data.value(QStringLiteral("name")).toString()),
+                QStringLiteral("已添加插件 %1").arg(pluginData.value(QStringLiteral("name")).toString()),
                 QStringLiteral("success"));
             emit installed(id);
         });

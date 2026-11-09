@@ -1,6 +1,6 @@
 # McServerManager 插件接口说明（Plugin SDK）
 
-版本：**apiVersion 1** · 适用于 McServerManager 1.1.2 及以上
+版本：**apiVersion 1** · 适用于 McServerManager 1.1.3 及以上
 
 本文档描述 McServerManager 的**插件包（plugin package）**机制：如何打包、导入、启用，以及
 前端（桌面界面）、后端（CLI 能力）、支持库 / Web 面板三类扩展分别可以调用哪些接口。
@@ -55,6 +55,8 @@ build\bin\mcsm-cli.exe plugin package inspect --zip dist\plugins\com.example.hel
 # 3) 安装（--force 覆盖同名插件，--disabled 安装后先不启用）
 build\bin\mcsm-cli.exe plugin package install --zip dist\plugins\com.example.hello-panel-1.0.0.zip
 build\bin\mcsm-cli.exe plugin package install --url https://example.com/my-plugin-1.0.0.zip --force
+
+# 安全：插件包 URL 必须使用 https；仅 localhost / 127.0.0.1 允许 http（本地测试）
 
 # 4) 查看 / 启停 / 卸载
 build\bin\mcsm-cli.exe plugin packages
@@ -202,7 +204,7 @@ my-plugin-1.0.0.zip
   "apiVersion": 1,
   "supportedMinApi": 1,
   "supportedMaxApi": 1,
-  "managerVersion": "1.1.2",
+  "managerVersion": "1.1.3",
   "apiVersionPolicy": {
     "type": "integer",
     "bumpOn": "每增加一批新接口 +1",
@@ -236,7 +238,7 @@ my-plugin-1.0.0.zip
 
 | 属性 | 说明 |
 | --- | --- |
-| `mcsm.version` | 管理器版本，如 `1.1.2` |
+| `mcsm.version` | 管理器版本，如 `1.1.3` |
 | `mcsm.apiVersion` | 当前接口级别（整数，如 `1`） |
 | `mcsm.plugin.id / .name / .version / .scope / .path` | 当前插件信息 |
 
@@ -576,6 +578,7 @@ Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(resu
 | 绝对路径 / 盘符 / UNC（`C:\…`、`\\server\…`、`/etc/…`） | 拒绝解压（提示"压缩包包含不安全路径"） |
 | `..` 跳出解压目录（zip-slip） | 拒绝解压 |
 | 符号链接指向外部 | 拒绝（解压后逐个校验落盘路径） |
+| `7z l` 读取条目失败 / 条目为空 | **拒绝解压**（fail-closed），不会跳过 zip-slip 校验 |
 | 解压后逐个校验落盘文件 | 必须仍在插件目录内，否则报错并清理 |
 | `frontend` / `backend` / `web` 入口、`web.service` | 必须是包内相对路径，绝对路径或 `..` 直接拒绝 |
 | 后端入口、`include()` 的真实路径 | 必须位于该插件目录内（符号链接会被展开检查） |
@@ -608,7 +611,7 @@ mcsm-cli plugin api --pretty
   "apiVersion": 1,
   "supportedMinApi": 1,
   "supportedMaxApi": 1,
-  "managerVersion": "1.1.2",
+  "managerVersion": "1.1.3",
   "apiVersionPolicy": {
     "type": "integer",
     "bumpOn": "每增加一批新接口 +1",

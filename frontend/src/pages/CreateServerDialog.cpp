@@ -1,6 +1,7 @@
 #include "pages/CreateServerDialog.h"
 
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -259,11 +260,30 @@ QWidget *CreateServerDialog::buildProgressArea()
     connect(m_createButton, &QPushButton::clicked, this, &CreateServerDialog::startInstall);
     connect(m_cancelButton, &QPushButton::clicked, this, [this]() {
         if (m_busy)
-            reject();
+            showError(QStringLiteral("正在安装，请等待完成（安装期间不能关闭窗口）"));
         else
             close();
     });
     return container;
+}
+
+void CreateServerDialog::closeEvent(QCloseEvent *event)
+{
+    if (m_busy) {
+        showError(QStringLiteral("正在安装，请等待完成（安装期间不能关闭窗口）"));
+        event->ignore();
+        return;
+    }
+    QDialog::closeEvent(event);
+}
+
+void CreateServerDialog::reject()
+{
+    if (m_busy) {
+        showError(QStringLiteral("正在安装，请等待完成（安装期间不能关闭窗口）"));
+        return;
+    }
+    QDialog::reject();
 }
 
 void CreateServerDialog::loadTypes()

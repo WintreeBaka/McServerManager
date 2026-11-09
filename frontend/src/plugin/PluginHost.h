@@ -178,6 +178,9 @@ private:
     QStringList m_quarantined;
     std::function<QJsonArray()> m_serverListProvider;
     QString m_selectedId;
+    /// Incremented on every plugin reload: in-flight backend callbacks capture
+    /// it and are dropped when the engine generation changed (audit H3).
+    quint64 m_generation = 0;
     bool m_busy = false;
     int m_generatedPageCounter = 0;
 };

@@ -400,6 +400,10 @@ void ServersPage::loadDetail(const QString &serverId)
     AppContext::instance()->backend()->request(
         {QStringLiteral("server"), QStringLiteral("get"), QStringLiteral("--id"), serverId}, this,
         [this, serverId](const Reply &reply) {
+            // A stale reply for the previously selected server must not
+            // repaint the detail panel of the current one.
+            if (AppContext::instance()->selectedServerId() != serverId)
+                return;
             if (!reply.ok)
                 return;
             ServerInfo info = ServerInfo::fromJson(reply.data);

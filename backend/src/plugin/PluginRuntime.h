@@ -39,12 +39,12 @@ public:
     static PluginCallOutcome call(const PluginManifest &manifest,
                                   const QString &method,
                                   const QJsonObject &params,
-                                  int timeoutMs = 30000);
+                                  int timeoutMs = 0);   // 0 = manifest backend.timeoutMs
 
     /// Runs `hook` on every enabled plugin that declared it.
     static QVector<PluginCallOutcome> callHook(const QString &hook,
                                                const QJsonObject &payload,
-                                               int timeoutMs = 30000);
+                                               int timeoutMs = 0);
 
     /// Runs `hook` and folds the outcomes into a Result (failures become
     /// warnings: a broken plugin must never block the manager).

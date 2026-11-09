@@ -63,6 +63,9 @@ signals:
     void availabilityChanged(bool available);
     void commandStarted(const QStringList &arguments);
     void commandFinished(const QStringList &arguments, bool ok);
+    /// A `server logs --follow` stream ended (crash, container stopped, backend
+    /// exit). The console page uses this to show the disconnect and reconnect.
+    void streamFinished(const QString &serverId, const QString &reason);
 
 private:
     QStringList globalFlags() const;

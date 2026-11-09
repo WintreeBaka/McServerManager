@@ -17,12 +17,17 @@ public:
     QVector<ServerRecord> all() const { return m_records; }
     bool reload();
     bool save() const;
+    /// Last reload failure (damaged registry / unreadable file). Empty = healthy.
+    QString lastError() const { return m_lastError; }
+    bool isHealthy() const { return m_lastError.isEmpty(); }
 
     bool contains(const QString &id) const;
     ServerRecord get(const QString &id) const;
     bool add(const ServerRecord &record, QString *error = nullptr);
     bool update(const ServerRecord &record, QString *error = nullptr);
     bool remove(const QString &id, QString *error = nullptr);
+    /// Range + uniqueness check across game and RCON ports of every server.
+    bool validatePorts(const ServerRecord &record, QString *error = nullptr) const;
     int indexOf(const QString &id) const;
 
     QString allocateId(const QString &name) const;
@@ -34,6 +39,7 @@ public:
 private:
     QString m_path;
     QVector<ServerRecord> m_records;
+    QString m_lastError;
 };
 
 } // namespace mcsm

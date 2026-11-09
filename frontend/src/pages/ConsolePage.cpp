@@ -56,6 +56,20 @@ ConsolePage::ConsolePage(QWidget *parent)
         loadHistory(id);
         startStream(id, 400);
     });
+
+    // A followed stream can end (container stopped, backend exited): tell the
+    // user and let the next activation reconnect instead of silently freezing.
+    connect(AppContext::instance()->backend(), &BackendClient::streamFinished, this,
+            [this](const QString &serverId, const QString &reason) {
+                if (m_streamServerId.isEmpty() || serverId != m_streamServerId)
+                    return;
+                m_stream = nullptr;          // BackendClient deletes the process
+                m_streamServerId.clear();
+                if (m_log)
+                    m_log->appendLine(QStringLiteral("[mcsm] %1；离开再返回本页会自动重连").arg(reason));
+                if (m_statusLabel)
+                    m_statusLabel->setText(QStringLiteral("日志流已断开"));
+            });
 }
 
 ConsolePage::~ConsolePage()
@@ -231,11 +245,12 @@ void ConsolePage::stopStream()
 {
     if (!m_stream)
         return;
-    m_stream->kill();
-    m_stream->waitForFinished(1500);
-    m_stream->deleteLater();
+    // Never block the UI thread waiting for docker to go away: kill it and let
+    // BackendClient's finished handler delete the QProcess.
+    QProcess *process = m_stream;
     m_stream = nullptr;
     m_streamServerId.clear();
+    process->kill();
 }
 
 void ConsolePage::sendCommand(const QString &command)

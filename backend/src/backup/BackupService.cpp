@@ -11,6 +11,7 @@
 #include <algorithm>
 
 #include "core/AppPaths.h"
+#include "core/Archive.h"
 #include "core/Logger.h"
 #include "core/ProcessRunner.h"
 #include "core/StringUtil.h"
@@ -240,12 +241,26 @@ bool BackupService::extract(const ServerRecord &record,
         return false;
     }
     if (archivePath.endsWith(QLatin1String(".zip"))) {
-        const ProcessResult result = ProcessRunner::run(
-            QStringLiteral("powershell"),
-            {QStringLiteral("-NoProfile"), QStringLiteral("-Command"),
-             QStringLiteral("Expand-Archive -LiteralPath '%1' -DestinationPath '%2' -Force")
-                 .arg(archivePath, record.dir)},
-            900000);
+        // Arguments go through QProcess (no shell string interpolation), so a
+        // path containing quotes can neither break the command nor inject one.
+        const QString sevenZip = Archive::toolPath();
+        QString program;
+        QStringList arguments;
+        if (!sevenZip.isEmpty()) {
+            program = sevenZip;
+            arguments << QStringLiteral("x") << archivePath
+                      << QStringLiteral("-o%1").arg(QDir::toNativeSeparators(record.dir))
+                      << members << QStringLiteral("-y");
+        } else if (!hostTar.isEmpty()) {
+            program = hostTar;
+            arguments << QStringLiteral("-xf") << archivePath
+                      << QStringLiteral("-C") << record.dir << members;
+        } else {
+            if (error)
+                *error = QStringLiteral("无法解压 %1（缺少 tar 或 7-Zip）").arg(archivePath);
+            return false;
+        }
+        const ProcessResult result = ProcessRunner::run(program, arguments, 900000);
         if (result.ok())
             return true;
         if (error)
@@ -275,6 +290,20 @@ Result BackupService::create(ServerStore &store,
                                                       : QStringLiteral("manual"))
                                          : trigger;
     QStringList notes;
+    // Marker written while chunk saving is suspended. If the process dies
+    // between save-off and save-on, the next backup restores saving first
+    // instead of leaving the server with writes disabled forever (L9).
+    const QString saveMarker =
+        QDir(AppPaths::serverRuntimeDir(record.id)).filePath(QStringLiteral("save-suspended"));
+    if (running && QFileInfo::exists(saveMarker)) {
+        RconClient rcon(QStringLiteral("127.0.0.1"), quint16(record.rconPort),
+                        record.rconPassword, 5000);
+        QString response;
+        QString rconError;
+        rcon.sendCommand(QStringLiteral("save-on"), &response, &rconError);
+        QFile::remove(saveMarker);
+        notes << QStringLiteral("检测到上次备份被中断，已先恢复 save-on");
+    }
 
     // live servers: flush the world and pause chunk writing while we archive
     bool saveSuspended = false;
@@ -286,6 +315,10 @@ Result BackupService::create(ServerStore &store,
             && rcon.sendCommand(QStringLiteral("save-all flush"), &response, &rconError)) {
             saveSuspended = true;
             notes << QStringLiteral("已执行 save-all flush");
+            QDir().mkpath(QFileInfo(saveMarker).absolutePath());
+            QFile marker(saveMarker);
+            if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                marker.close();
             QThread::msleep(1200);
         } else {
             notes << QStringLiteral("RCON 不可用，直接备份当前磁盘内容");
@@ -303,6 +336,7 @@ Result BackupService::create(ServerStore &store,
         QString response;
         QString rconError;
         rcon.sendCommand(QStringLiteral("save-on"), &response, &rconError);
+        QFile::remove(saveMarker);
     }
 
     if (!archived)
@@ -398,19 +432,40 @@ Result BackupService::restore(ServerStore &store,
                                 .arg(name, wanted.join(QStringLiteral(", "))));
     }
 
+    // Move the current data aside instead of deleting it first: a failed
+    // extraction can be rolled back, and the world is never left empty.
+    const QString rollbackDir = QDir(record.dir)
+                                    .filePath(QStringLiteral(".mcsm/restore-%1")
+                                                  .arg(StringUtil::randomToken(8)));
+    QDir().mkpath(rollbackDir);
+    QStringList moved;
     for (const QString &entry : targets) {
         const QString path = QDir(record.dir).filePath(entry);
-        QFileInfo info(path);
-        if (info.isDir()) {
-            QDir(path).removeRecursively();
-        } else if (info.isFile()) {
-            QFile::remove(path);
+        if (!QFileInfo::exists(path))
+            continue;
+        const QString destination = QDir(rollbackDir).filePath(entry);
+        QDir().mkpath(QFileInfo(destination).absolutePath());
+        if (QDir().rename(path, destination)) {
+            moved << entry;
+        } else {
+            Logger::warn(QStringLiteral("restore"),
+                         QStringLiteral("无法移动 %1 到回滚目录").arg(path));
         }
     }
 
     QString extractError;
-    if (!extract(record, archivePath, targets, &extractError))
-        return Result::fail(QStringLiteral("RESTORE_FAILED"), QStringLiteral("解压备份失败"), extractError);
+    if (!extract(record, archivePath, targets, &extractError)) {
+        for (const QString &entry : moved) {
+            const QString source = QDir(rollbackDir).filePath(entry);
+            const QString destination = QDir(record.dir).filePath(entry);
+            QDir().mkpath(QFileInfo(destination).absolutePath());
+            QDir().rename(source, destination);
+        }
+        Archive::removeTree(rollbackDir, nullptr);
+        return Result::fail(QStringLiteral("RESTORE_FAILED"), QStringLiteral("解压备份失败（已回滚原数据）"),
+                            extractError);
+    }
+    Archive::removeTree(rollbackDir, nullptr);
 
     QJsonObject data;
     data.insert(QStringLiteral("restored"), name);

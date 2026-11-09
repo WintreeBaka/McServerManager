@@ -172,16 +172,16 @@ QJsonObject ConfigField::toJson() const
     object.insert(QStringLiteral("max"), max);
     object.insert(QStringLiteral("advanced"), advanced);
     object.insert(QStringLiteral("restartRequired"), restartRequired);
-    QString type;
+    QString typeName;
     switch (this->type) {
-    case ConfigFieldType::Text: type = QStringLiteral("text"); break;
-    case ConfigFieldType::Integer: type = QStringLiteral("int"); break;
-    case ConfigFieldType::Boolean: type = QStringLiteral("bool"); break;
-    case ConfigFieldType::Choice: type = QStringLiteral("choice"); break;
-    case ConfigFieldType::Password: type = QStringLiteral("password"); break;
-    case ConfigFieldType::Decimal: type = QStringLiteral("decimal"); break;
+    case ConfigFieldType::Text: typeName = QStringLiteral("text"); break;
+    case ConfigFieldType::Integer: typeName = QStringLiteral("int"); break;
+    case ConfigFieldType::Boolean: typeName = QStringLiteral("bool"); break;
+    case ConfigFieldType::Choice: typeName = QStringLiteral("choice"); break;
+    case ConfigFieldType::Password: typeName = QStringLiteral("password"); break;
+    case ConfigFieldType::Decimal: typeName = QStringLiteral("decimal"); break;
     }
-    object.insert(QStringLiteral("type"), type);
+    object.insert(QStringLiteral("type"), typeName);
     object.insert(QStringLiteral("options"), QJsonArray::fromStringList(options));
     return object;
 }

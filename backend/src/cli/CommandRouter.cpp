@@ -303,6 +303,10 @@ Result CommandRouter::cmdServer()
     const QString id = m_args.value(QStringLiteral("id"), m_args.positional(2));
 
     if (action == QLatin1String("list")) {
+        if (!store.isHealthy())
+            return Result::fail(QStringLiteral("STORE_CORRUPT"),
+                                QStringLiteral("服务器注册表损坏，已停止读取以免覆盖数据"),
+                                store.lastError());
         QJsonArray array;
         for (const ServerRecord &record : store.all())
             array.append(ServerLifecycle::status(record, m_args.boolValue(QStringLiteral("stats"), false)));
@@ -918,7 +922,7 @@ Result CommandRouter::cmdPluginPackage()
                                 QStringLiteral("插件 %1 未安装").arg(name));
         const PluginCallOutcome outcome =
             PluginRuntime::call(manifest, method, m_args.jsonObject(QStringLiteral("params")),
-                                m_args.intValue(QStringLiteral("timeout"), 30000));
+                                m_args.intValue(QStringLiteral("timeout"), 0));
         if (!outcome.ok) {
             Result failure = Result::fail(outcome.code, outcome.message, outcome.detail);
             failure.with(outcome.toJson());
@@ -946,7 +950,7 @@ Result CommandRouter::cmdPluginPackage()
             return Result::fail(QStringLiteral("NOT_FOUND"),
                                 QStringLiteral("插件 %1 未安装").arg(name));
         const PluginCallOutcome outcome =
-            PluginRuntime::call(manifest, hook, payload, m_args.intValue(QStringLiteral("timeout"), 30000));
+            PluginRuntime::call(manifest, hook, payload, m_args.intValue(QStringLiteral("timeout"), 0));
         if (!outcome.ok) {
             Result failure = Result::fail(outcome.code, outcome.message, outcome.detail);
             failure.with(outcome.toJson());

@@ -7,6 +7,7 @@
 
 #include "config/ConfigManager.h"
 #include "core/AppPaths.h"
+#include "core/Archive.h"
 #include "core/Logger.h"
 #include "core/ProcessRunner.h"
 #include "core/StringUtil.h"
@@ -71,7 +72,8 @@ bool ServerInstaller::downloadJar(ServerRecord *record, QString *error, const In
     const QString target = record->jarPath();
     QDir().mkpath(record->dir);
 
-    if (QFileInfo::exists(target) && QFileInfo(target).size() > 4096) {
+    if (QFileInfo::exists(target) && QFileInfo(target).size() > 4096
+        && Archive::isZipArchive(target)) {
         report(progress, QStringLiteral("下载服务端"), 70,
                QStringLiteral("已存在 %1，跳过下载").arg(record->jarName));
         return true;
@@ -93,9 +95,10 @@ bool ServerInstaller::downloadJar(ServerRecord *record, QString *error, const In
         });
     if (!ok)
         return false;
-    if (QFileInfo(target).size() < 1024) {
+    // A jar is a zip; a redirect/CDN error page (or a truncated download) is not.
+    if (QFileInfo(target).size() < 1024 || !Archive::isZipArchive(target)) {
         if (error)
-            *error = QStringLiteral("下载到的服务端文件异常（过小），请检查网络或代理设置");
+            *error = QStringLiteral("下载到的服务端文件异常（过小或不是 jar/zip），请检查网络或代理设置");
         QFile::remove(target);
         return false;
     }
@@ -200,6 +203,17 @@ Result ServerInstaller::install(ServerStore &store,
     record.mcVersion = request.mcVersion.trimmed();
     record.port = request.port > 0 ? request.port : store.allocatePort();
     record.rconPort = request.rconPort > 0 ? request.rconPort : store.allocateRconPort();
+    // Only auto-shift the port we picked ourselves; an explicitly requested
+    // duplicate is a user error and is rejected below.
+    if (request.rconPort <= 0 && record.rconPort == record.port)
+        record.rconPort = store.allocateRconPort(record.rconPort + 1);
+    {
+        QString portError;
+        if (!store.validatePorts(record, &portError)) {
+            return Result::fail(QStringLiteral("PORT_IN_USE"),
+                                QStringLiteral("端口设置不可用"), portError);
+        }
+    }
     record.memory = request.memory.trimmed().isEmpty() ? QStringLiteral("4G") : request.memory.trimmed();
     record.memoryLimit = request.memoryLimit.trimmed();
     record.levelName = request.levelName.trimmed().isEmpty() ? QStringLiteral("world")

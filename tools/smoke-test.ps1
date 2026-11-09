@@ -42,13 +42,14 @@ function Write-Result {
 
 # Runs the CLI and returns the parsed JSON envelope (never throws).
 function Invoke-Cli {
-    param([string[]]$Arguments, [switch]$AllowFailure)
+    param([string[]]$Arguments, [switch]$AllowFailure, [string]$HomeDir = "")
     # the CLI mirrors warnings to stderr; with ErrorActionPreference=Stop that
     # native stderr output would abort the whole script, so relax it here
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    $targetHome = if ($HomeDir) { $HomeDir } else { $DataRoot }
     try {
-        $raw = & $Exe --home $DataRoot @Arguments 2>&1
+        $raw = & $Exe --home $targetHome @Arguments 2>&1
     } finally {
         $ErrorActionPreference = $previous
     }
@@ -85,6 +86,7 @@ $DataRoot = (Resolve-Path $DataRoot).Path
 
 if ($QtBin -and (Test-Path $QtBin)) { $env:PATH = "$QtBin;$env:PATH" }
 if ($MinGwBin -and (Test-Path $MinGwBin)) { $env:PATH = "$MinGwBin;$env:PATH" }
+$nodeAvailable = [bool](Get-Command node -ErrorAction SilentlyContinue)
 
 Write-Host ""
 Write-Host "McServerManager backend smoke test" -ForegroundColor Cyan
@@ -152,7 +154,10 @@ $hasCrLf = $startScript.Contains("`r`n")
 Write-Result "start.sh uses LF endings" (-not $hasCrLf) "CRLF found"
 
 $detail = Invoke-Cli @("server", "get", "--id", $serverId)
-Write-Result "server get" ($detail.ok -and $detail.data.status -eq "stopped") $detail.error.message
+# With the Docker daemon stopped the container state cannot be queried, so the
+# honest answer is "unknown" (never "stopped" - see audit M5).
+Write-Result "server get" `
+    ($detail.ok -and ($detail.data.status -in @("stopped", "unknown"))) $detail.error.message
 
 # ----------------------------------------------------------------- config ----
 Write-Host ""
@@ -558,6 +563,59 @@ if (-not $zipTool) {
             ($official.ok -and $official.data.scope -eq "global" -and $official.data.apiVersion -eq 1 `
                 -and $official.data.hasFrontend -and $official.data.hasBackend) `
             ("scope=" + $official.data.scope + " api=" + $official.data.apiVersion)
+    }
+
+    # ------------------------------------------------- audit regressions -----
+    Write-Host ""
+    Write-Host "audit regressions (1.1.3)" -ForegroundColor Cyan
+
+    $auditHome = Join-Path $DataRoot "audit-home"
+    New-Item -ItemType Directory -Force -Path (Join-Path $auditHome "assets") | Out-Null
+    $auditJar = Join-Path $auditHome "assets\fake.jar"
+    [System.IO.File]::WriteAllBytes($auditJar, (New-Object byte[] 8192))
+
+    $badRcon = Invoke-Cli @("install", "--name", "audit-rcon", "--manual", "true",
+                            "--jar", $auditJar, "--port", "25611", "--rcon-port", "70000",
+                            "--skip-docker", "true") -AllowFailure -HomeDir $auditHome
+    Write-Result "invalid rcon port is rejected" `
+        ((-not $badRcon.ok) -and $badRcon.error.code -eq "PORT_IN_USE") ("code=" + $badRcon.error.code)
+
+    $samePort = Invoke-Cli @("install", "--name", "audit-same", "--manual", "true",
+                             "--jar", $auditJar, "--port", "25612", "--rcon-port", "25612",
+                             "--skip-docker", "true") -AllowFailure -HomeDir $auditHome
+    Write-Result "game and rcon port must differ" `
+        ((-not $samePort.ok) -and $samePort.error.code -eq "PORT_IN_USE") ("code=" + $samePort.error.code)
+
+    $brokenHome = Join-Path $DataRoot "audit-broken-store"
+    New-Item -ItemType Directory -Force -Path $brokenHome | Out-Null
+    Set-Content -Path (Join-Path $brokenHome "servers.json") -Value '{ broken' -Encoding UTF8
+    $brokenStore = Invoke-Cli @("server", "list") -AllowFailure -HomeDir $brokenHome
+    $brokenBackup = Get-ChildItem $brokenHome -Filter "servers.json.broken-*" -ErrorAction SilentlyContinue
+    Write-Result "corrupt servers.json is reported, not cleared" `
+        ((-not $brokenStore.ok) -and $brokenStore.error.code -eq "STORE_CORRUPT") `
+        ("code=" + $brokenStore.error.code)
+    Write-Result "corrupt servers.json is backed up" ($null -ne $brokenBackup) "no .broken backup"
+
+    if ($nodeAvailable) {
+        $slowDir = Join-Path $DataRoot "audit-slow"
+        New-Item -ItemType Directory -Force -Path $slowDir | Out-Null
+        $slowManifest = @{
+            id = "com.smoke.slow"; name = "slow"; version = "1.0.0"; apiVersion = 1
+            scope = "backend"; license = "MIT"
+            backend = @{ entry = "backend/index.js"; runtime = "node"; timeoutMs = 250 }
+            hooks = @("server.beforeStart")
+        } | ConvertTo-Json -Depth 5
+        $slowZip = Join-Path $slowDir "slow.zip"
+        New-RawZip -Path $slowZip -Entries @{
+            "plugin.json" = $slowManifest
+            "backend/index.js" = "setTimeout(function(){process.stdout.write(JSON.stringify({ok:true,data:{}})+'\n');},2000);"
+        }
+        $installSlow = Invoke-Cli @("plugin", "package", "install", "--zip", $slowZip) -HomeDir $auditHome
+        $slowCall = Invoke-Cli @("plugin", "call", "--name", "com.smoke.slow",
+                                 "--method", "server.beforeStart") -AllowFailure -HomeDir $auditHome
+        Write-Result "backend.timeoutMs is honoured" `
+            ($installSlow.ok -and (-not $slowCall.ok) -and $slowCall.error.code -eq "PLUGIN_TIMEOUT") `
+            ("code=" + $slowCall.error.code)
     }
 }
 

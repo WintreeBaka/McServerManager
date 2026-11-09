@@ -73,6 +73,17 @@ ProcessResult ProcessRunner::run(const QString &program,
 
     if (!process.waitForFinished(timeoutMs)) {
         result.timedOut = true;
+#ifdef Q_OS_WIN
+        // Kill the whole tree: plugin / installer helpers may have spawned
+        // grandchildren that would otherwise keep running after the timeout.
+        const qint64 pid = process.processId();
+        if (pid > 0) {
+            run(QStringLiteral("taskkill"),
+                {QStringLiteral("/PID"), QString::number(pid), QStringLiteral("/T"),
+                 QStringLiteral("/F")},
+                30000);
+        }
+#endif
         process.kill();
         process.waitForFinished(3000);
     }
@@ -94,15 +105,6 @@ QProcess *ProcessRunner::startAsync(const QString &program,
     process->setProcessChannelMode(mergeChannels ? QProcess::MergedChannels : QProcess::SeparateChannels);
     process->start();
     return process;
-}
-
-QProcess *ProcessRunner::startDetached(const QString &program,
-                                       const QStringList &arguments,
-                                       const QString &workingDirectory)
-{
-    if (startDetachedOk(program, arguments, workingDirectory))
-        return nullptr;
-    return nullptr;
 }
 
 bool ProcessRunner::startDetachedOk(const QString &program,

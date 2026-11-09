@@ -21,6 +21,17 @@ struct DockerStatus
     QJsonObject toJson() const;
 };
 
+/// Result of querying one container. `ok == false` means the query itself
+/// failed (docker missing, daemon down, timeout) - that must NOT be confused
+/// with "the container does not exist".
+struct ContainerState
+{
+    bool ok = false;        // the query ran
+    bool exists = false;    // a container object exists
+    QString state;          // running|exited|created|dead|paused|restarting|missing|unknown
+    QString error;          // query error when !ok
+};
+
 /// Container lifecycle for the JDK runtime of every managed server.
 ///
 /// Design: one container per server, bind mounting the server directory to
@@ -43,7 +54,9 @@ public:
                                       const QString &startScript,
                                       QString *error);
     static bool containerExists(const QString &serverId);
-    static QString containerState(const QString &serverId); // running|exited|created|missing
+    static QString containerState(const QString &serverId); // running|exited|created|missing|unknown
+    /// Distinguishes "no such container" from "docker could not be queried".
+    static ContainerState inspectState(const QString &serverId);
     static ProcessResult startExisting(const QString &serverId);
     static ProcessResult stopContainer(const QString &serverId, int timeoutSec = 45, bool force = false);
     static ProcessResult removeContainer(const QString &serverId, bool force = true);

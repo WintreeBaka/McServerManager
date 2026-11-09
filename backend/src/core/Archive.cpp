@@ -127,7 +127,17 @@ bool Archive::extractZip(const QString &archivePath, const QString &destination,
     // Security: a package must never be able to write outside the plugin
     // directory (zip-slip / absolute paths / drive letters). The entries are
     // checked *before* extraction, and the result is verified afterwards.
-    const QStringList entries = listEntries(archivePath);
+    QString listError;
+    const QStringList entries = listEntries(archivePath, &listError);
+    if (entries.isEmpty()) {
+        // Fail closed: if the listing could not be read we cannot prove the
+        // archive is free of zip-slip entries, so refuse to extract at all.
+        if (error)
+            *error = listError.isEmpty()
+                         ? QStringLiteral("压缩包为空或无法读取条目列表，已拒绝解压")
+                         : QStringLiteral("无法读取压缩包条目列表：%1").arg(listError);
+        return false;
+    }
     for (const QString &entry : entries) {
         if (!isSafeRelativePath(entry)) {
             if (error)

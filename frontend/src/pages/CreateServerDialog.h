@@ -31,6 +31,12 @@ public:
 signals:
     void serverCreated(const QString &serverId);
 
+protected:
+    /// While an install is running the dialog must not be dismissed: destroying
+    /// it would silently kill the backend download/extract process (audit M15).
+    void closeEvent(QCloseEvent *event) override;
+    void reject() override;
+
 private:
     QWidget *buildAutoPane();
     QWidget *buildManualPane();

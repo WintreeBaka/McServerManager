@@ -36,7 +36,7 @@ private:
 
     void loadSchema();
     void buildFields(const QJsonArray &fields);
-    void loadServer(const QString &serverId);
+    void loadServer(const QString &serverId, bool force = false);
     void applyValues(const QMap<QString, QString> &values);
     void saveQuick();
     void saveExpert();
@@ -45,6 +45,9 @@ private:
     void rollbackTo(const QString &backupId);
     void setStatus(const QString &message, bool error = false);
     void setBusy(bool busy);
+    /// True when the quick editors or the expert text differ from what was
+    /// loaded from disk (used to protect unsaved edits and stale replies).
+    bool isDirty() const;
 
     QString editorValue(const QString &key) const;
     void setEditorValue(const QString &key, const QString &value);
@@ -73,6 +76,7 @@ private:
     QLabel *m_historyHint = nullptr;
 
     QString m_serverId;
+    QString m_originalRaw;
     QJsonObject m_schemaValues;
     QMap<QString, QString> m_originalValues;
     bool m_busy = false;

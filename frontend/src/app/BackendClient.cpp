@@ -274,6 +274,18 @@ void BackendClient::request(const QStringList &arguments,
                          guard->deleteLater();
                      });
 
+    // If the owning widget is destroyed while the command runs, drop the entry
+    // and terminate the child instead of leaking it in m_active.
+    if (context && context != process) {
+        QObject::connect(context, &QObject::destroyed, process, [this, guard]() {
+            if (!guard)
+                return;
+            m_active.remove(guard.data());
+            if (guard->state() != QProcess::NotRunning)
+                guard->kill();
+        });
+    }
+
     const int effectiveTimeout = timeoutMs > 0 ? timeoutMs : kDefaultRequestTimeoutMs;
     QObject::connect(watchdog, &QTimer::timeout, process,
                      [this, guard, state, args, handler, delivered, effectiveTimeout]() {
@@ -386,6 +398,20 @@ QProcess *BackendClient::streamLogs(const QString &serverId, int tail, QObject *
     });
 
     process->start();
+
+    QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), process,
+                     [this, process, serverId](int exitCode, QProcess::ExitStatus status) {
+                         const QString reason = status == QProcess::CrashExit
+                                                    ? QStringLiteral("日志流进程异常退出")
+                                                    : QStringLiteral("日志流已结束（退出码 %1）").arg(exitCode);
+                         emit streamFinished(serverId, reason);
+                         process->deleteLater();
+                     });
+    QObject::connect(process, &QProcess::errorOccurred, process,
+                     [this, serverId](QProcess::ProcessError error) {
+                         if (error == QProcess::FailedToStart)
+                             emit streamFinished(serverId, QStringLiteral("无法启动日志流"));
+                     });
     return process;
 }
 

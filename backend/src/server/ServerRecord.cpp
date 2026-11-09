@@ -197,6 +197,16 @@ bool ServerRecord::isValid(QString *error) const
             *error = QStringLiteral("port %1 is out of range").arg(port);
         return false;
     }
+    if (rconPort <= 0 || rconPort > 65535) {
+        if (error)
+            *error = QStringLiteral("rcon port %1 is out of range").arg(rconPort);
+        return false;
+    }
+    if (rconPort == port) {
+        if (error)
+            *error = QStringLiteral("rcon port must differ from the game port");
+        return false;
+    }
     if (dir.isEmpty()) {
         if (error)
             *error = QStringLiteral("dir is required");

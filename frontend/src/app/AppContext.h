@@ -118,6 +118,10 @@ private:
     QVector<QPair<QString, QString>> m_activity;
     QJsonObject m_environment;
     QString m_dataHomeCache;
+    /// Sequence of server-list requests: replies older than the newest request
+    /// are ignored so a slow snapshot cannot roll the UI back.
+    quint64 m_serverListSeq = 0;
+    bool m_pollInFlight = false;
     int m_pollTicks = 0;
     bool m_experimental = false;
     bool m_bootstrapped = false;

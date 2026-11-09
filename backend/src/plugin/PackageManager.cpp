@@ -7,8 +7,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
-#include <QUrl>
 #include <QUuid>
+#include <QUrl>
 
 #include "core/AppPaths.h"
 #include "core/Archive.h"
@@ -184,7 +184,7 @@ int PackageManager::supportedMaxApi()
 QString PackageManager::managerVersion()
 {
     const QString version = QCoreApplication::applicationVersion();
-    return version.isEmpty() ? QStringLiteral("1.1.2") : version;
+    return version.isEmpty() ? QStringLiteral("1.1.3") : version;
 }
 
 bool PackageManager::isSafePluginPath(const QString &relative)
@@ -451,7 +451,43 @@ PluginValidation PackageManager::inspectDirectory(const QString &directory, QStr
 
 QJsonObject PackageManager::readRegistry()
 {
-    QJsonObject registry = Json::readObjectFile(AppPaths::pluginRegistryFile());
+    const QString path = AppPaths::pluginRegistryFile();
+    bool parsed = false;
+    QJsonObject registry = Json::readObjectFile(path, &parsed);
+    if (QFileInfo::exists(path) && !parsed) {
+        // A damaged registry must not look like "no plugins installed" - that
+        // would make the next write erase every entry. Keep a copy and rebuild
+        // the list from the plugin directories on disk.
+        const QString backup = QStringLiteral("%1.broken-%2")
+                                   .arg(path, nowIso().replace(QLatin1Char(':'), QLatin1Char('-')));
+        QFile::copy(path, backup);
+        Logger::warn(QStringLiteral("plugin"),
+                     QStringLiteral("registry.json 解析失败，已备份到 %1 并从插件目录重建").arg(backup));
+        QJsonArray rebuilt;
+        const QDir dir(AppPaths::pluginsDir());
+        const QFileInfoList children =
+            dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const QFileInfo &child : children) {
+            if (!QFileInfo::exists(QDir(child.absoluteFilePath()).filePath(QStringLiteral("plugin.json"))))
+                continue;
+            PluginValidation validation = inspectDirectory(child.absoluteFilePath(), nullptr);
+            if (!validation.ok)
+                continue;
+            rebuilt.append(QJsonObject {
+                {QStringLiteral("id"), validation.manifest.id},
+                {QStringLiteral("name"), validation.manifest.name},
+                {QStringLiteral("version"), validation.manifest.version},
+                {QStringLiteral("scope"),
+                 PluginManifest::scopeName(validation.manifest.scope)},
+                {QStringLiteral("enabled"), true},
+                {QStringLiteral("path"), child.absoluteFilePath()},
+                {QStringLiteral("installedAt"), nowIso()},
+                {QStringLiteral("source"), QStringLiteral("recovered")},
+            });
+        }
+        registry = QJsonObject {{QStringLiteral("plugins"), rebuilt},
+                                {QStringLiteral("recovered"), true}};
+    }
     if (!registry.contains(QStringLiteral("plugins")))
         registry.insert(QStringLiteral("plugins"), QJsonArray());
     registry.insert(QStringLiteral("apiVersion"), apiVersion());
@@ -604,6 +640,23 @@ Result PackageManager::install(const PluginInstallRequest &request)
     QString archivePath = request.zipPath.trimmed();
     QString source = QStringLiteral("zip");
     if (!request.url.trimmed().isEmpty()) {
+        const QUrl remote(request.url.trimmed());
+        const QString scheme = remote.scheme().toLower();
+        const QString host = remote.host().toLower();
+        const bool loopback = host == QLatin1String("localhost")
+                              || host == QLatin1String("127.0.0.1")
+                              || host == QLatin1String("::1");
+        if (!remote.isValid() || (scheme != QLatin1String("https") && scheme != QLatin1String("http"))) {
+            cleanup();
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
+                                QStringLiteral("插件包 URL 不合法"), request.url);
+        }
+        if (scheme == QLatin1String("http") && !loopback) {
+            cleanup();
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
+                                QStringLiteral("插件包 URL 必须使用 https"),
+                                QStringLiteral("明文 http 只允许 localhost/127.0.0.1（本地测试）"));
+        }
         const QString downloadPath = QDir(staging).filePath(QStringLiteral("source.zip"));
         QString downloadError;
         Logger::info(QStringLiteral("plugin"),
@@ -677,23 +730,41 @@ Result PackageManager::install(const PluginInstallRequest &request)
                             QStringLiteral("插件 %1 已安装").arg(manifest.id),
                             QStringLiteral("如需覆盖请使用 --force"));
     }
-    if (replacing) {
-        QString removeError;
-        if (!Archive::removeTree(target, &removeError)) {
-            cleanup();
-            return Result::fail(QStringLiteral("IO_ERROR"),
-                                QStringLiteral("无法移除已安装的插件"), removeError);
-        }
-    }
-
+    // Transactional install: copy into a staging directory first, then swap it
+    // in. A failed copy can no longer destroy the previously installed version.
+    const QString installStaging = QDir(AppPaths::pluginsDir())
+                                       .filePath(QStringLiteral(".staging-%1")
+                                                     .arg(QUuid::createUuid().toString(QUuid::Id128)));
+    const QString trash = QDir(AppPaths::pluginsDir())
+                              .filePath(QStringLiteral(".trash-%1")
+                                            .arg(QUuid::createUuid().toString(QUuid::Id128)));
     QStringList copiedFiles;
     QString copyError;
-    if (!copyTree(manifest.path, target, &copiedFiles, &copyError)) {
+    if (!copyTree(manifest.path, installStaging, &copiedFiles, &copyError)) {
+        Archive::removeTree(installStaging, nullptr);
         cleanup();
         return Result::fail(QStringLiteral("IO_ERROR"),
                             QStringLiteral("写入插件目录失败"), copyError);
     }
     cleanup();
+
+    if (replacing) {
+        if (!QDir().rename(target, trash)) {
+            Archive::removeTree(installStaging, nullptr);
+            return Result::fail(QStringLiteral("IO_ERROR"),
+                                QStringLiteral("无法替换已安装的插件"),
+                                QStringLiteral("旧版本目录无法移动：%1").arg(target));
+        }
+    }
+    if (!QDir().rename(installStaging, target)) {
+        if (replacing)
+            QDir().rename(trash, target);
+        Archive::removeTree(installStaging, nullptr);
+        return Result::fail(QStringLiteral("IO_ERROR"),
+                            QStringLiteral("无法启用新版本插件目录"), target);
+    }
+    if (replacing)
+        Archive::removeTree(trash, nullptr);
 
     manifest.path = target;
     manifest.enabled = request.enable;
@@ -752,17 +823,7 @@ Result PackageManager::remove(const QString &id, bool purgeData)
         return Result::fail(QStringLiteral("NOT_FOUND"),
                             QStringLiteral("插件 %1 未安装").arg(id));
 
-    QString removeError;
-    if (!Archive::removeTree(manifest.path, &removeError))
-        return Result::fail(QStringLiteral("IO_ERROR"),
-                            QStringLiteral("无法删除插件目录"), removeError);
-
-    bool dataRemoved = false;
-    if (purgeData) {
-        QString dataError;
-        dataRemoved = Archive::removeTree(AppPaths::pluginDataDir(manifest.id), &dataError);
-    }
-
+    // Update the registry first: if that write fails nothing has been deleted.
     QJsonObject registry = readRegistry();
     QJsonArray next;
     const QJsonArray entries = registry.value(QStringLiteral("plugins")).toArray();
@@ -772,7 +833,20 @@ Result PackageManager::remove(const QString &id, bool purgeData)
     }
     registry.insert(QStringLiteral("plugins"), next);
     QString registryError;
-    writeRegistry(registry, &registryError);
+    if (!writeRegistry(registry, &registryError))
+        return Result::fail(QStringLiteral("IO_ERROR"),
+                            QStringLiteral("无法更新插件注册表，未执行删除"), registryError);
+
+    QString removeError;
+    if (!Archive::removeTree(manifest.path, &removeError))
+        return Result::fail(QStringLiteral("IO_ERROR"),
+                            QStringLiteral("插件已从注册表移除，但目录删除失败"), removeError);
+
+    bool dataRemoved = false;
+    if (purgeData) {
+        QString dataError;
+        dataRemoved = Archive::removeTree(AppPaths::pluginDataDir(manifest.id), &dataError);
+    }
 
     Logger::info(QStringLiteral("plugin"), QStringLiteral("removed package %1").arg(manifest.id));
     return Result::ok(QJsonObject {

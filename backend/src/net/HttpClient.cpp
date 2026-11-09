@@ -10,6 +10,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSaveFile>
+#include <QTemporaryFile>
 #include <QTimer>
 
 #include "core/Logger.h"
@@ -137,12 +138,21 @@ bool HttpClient::download(const QUrl &url,
         QNetworkReply *handle = manager.get(request);
         QEventLoop loop;
         QTimer guard;
+        // Buffer one hop in a temp file: a redirect body is discarded, and a
+        // 2xx body is copied into the target only after the hop completes.
+        QTemporaryFile hopFile;
+        if (!hopFile.open()) {
+            handle->abort();
+            handle->deleteLater();
+            file.cancelWriting();
+            return failWith(QStringLiteral("cannot create temporary download file"));
+        }
         guard.setSingleShot(true);
         QObject::connect(handle, &QNetworkReply::finished, &loop, &QEventLoop::quit);
         QObject::connect(handle, &QNetworkReply::readyRead, &loop, [&]() {
             const QByteArray chunk = handle->readAll();
             if (!chunk.isEmpty())
-                file.write(chunk);
+                hopFile.write(chunk);
         });
         QObject::connect(handle, &QNetworkReply::downloadProgress, &loop,
                          [&progress](qint64 got, qint64 total) {
@@ -156,11 +166,10 @@ bool HttpClient::download(const QUrl &url,
         guard.start(timeoutMs);
         loop.exec();
 
+        const int status = handle->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray rest = handle->readAll();
         if (!rest.isEmpty())
-            file.write(rest);
-
-        const int status = handle->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            hopFile.write(rest);
         const QVariant location = handle->attribute(QNetworkRequest::RedirectionTargetAttribute);
         const QString netErrorText = handle->errorString();
         const QNetworkReply::NetworkError netError = handle->error();
@@ -175,6 +184,16 @@ bool HttpClient::download(const QUrl &url,
             return failWith(netErrorText.isEmpty()
                                 ? QStringLiteral("download failed with http %1").arg(status)
                                 : QStringLiteral("download failed: %1").arg(netErrorText));
+        }
+
+        hopFile.flush();
+        hopFile.seek(0);
+        while (!hopFile.atEnd()) {
+            const QByteArray chunk = hopFile.read(256 * 1024);
+            if (chunk.isEmpty() || file.write(chunk) != chunk.size()) {
+                file.cancelWriting();
+                return failWith(QStringLiteral("cannot write %1").arg(targetPath));
+            }
         }
 
         if (!file.commit())

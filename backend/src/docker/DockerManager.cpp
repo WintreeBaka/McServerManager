@@ -181,6 +181,25 @@ ProcessResult DockerManager::runContainer(const ServerRecord &record,
     }
 
     const QString name = containerName(record.id);
+    // Defensive: never destroy a live container here. ServerLifecycle checks the
+    // state first, but a direct caller must not be able to kill a running server
+    // by rebuilding it (H1 in the 2026-11-08 audit).
+    const ContainerState current = inspectState(record.id);
+    if (current.ok && current.exists
+        && (current.state == QLatin1String("running")
+            || current.state == QLatin1String("paused")
+            || current.state == QLatin1String("restarting"))) {
+        const QString message =
+            QStringLiteral("容器 %1 正在运行（%2），拒绝重建；如需重启请使用 restart")
+                .arg(name, current.state);
+        if (error)
+            *error = message;
+        ProcessResult blocked;
+        blocked.started = true;
+        blocked.exitCode = 1;
+        blocked.stdErr = message;
+        return blocked;
+    }
     removeContainer(record.id, true);
 
     const QString mount = mountPath(record.dir);
@@ -239,11 +258,39 @@ bool DockerManager::containerExists(const QString &serverId)
 
 QString DockerManager::containerState(const QString &serverId)
 {
+    const ContainerState info = inspectState(serverId);
+    if (!info.ok)
+        return QStringLiteral("unknown");
+    return info.state;
+}
+
+ContainerState DockerManager::inspectState(const QString &serverId)
+{
+    ContainerState info;
     const ProcessResult result = inspect(serverId, QStringLiteral("{{.State.Status}}"));
-    if (!result.ok())
-        return QStringLiteral("missing");
-    const QString state = result.stdOut.trimmed();
-    return state.isEmpty() ? QStringLiteral("missing") : state;
+    if (result.ok()) {
+        info.ok = true;
+        info.exists = true;
+        info.state = result.stdOut.trimmed();
+        if (info.state.isEmpty())
+            info.state = QStringLiteral("unknown");
+        return info;
+    }
+    // docker inspect exits non-zero both for "no such container" and for
+    // daemon/permission/timeout failures; only the former means "missing".
+    const QString text = (result.stdOut + QStringLiteral("\n") + result.stdErr).toLower();
+    if (text.contains(QLatin1String("no such object"))
+        || text.contains(QLatin1String("no such container"))) {
+        info.ok = true;
+        info.exists = false;
+        info.state = QStringLiteral("missing");
+        return info;
+    }
+    info.ok = false;
+    info.exists = false;
+    info.error = result.errorText();
+    info.state = QStringLiteral("unknown");
+    return info;
 }
 
 ProcessResult DockerManager::startExisting(const QString &serverId)

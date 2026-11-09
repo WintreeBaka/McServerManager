@@ -145,10 +145,15 @@ QWidget *DashboardPage::buildEnvironmentCard()
                                 .arg(palette.surfaceAlt.name(), palette.text.name()));
 
         auto *column = new QVBoxLayout();
-        column->setSpacing(0);
+        column->setSpacing(2);
         auto *title = makeLabel(label, QStringLiteral("caption"), row);
         *hint = makeLabel(QStringLiteral("--"), QStringLiteral("hint"), row);
         *value = makeLabel(QStringLiteral("检测中"), QStringLiteral("subtitle"), row);
+        // The three stacked labels used to be squeezed into the icon's 30px
+        // height while loading, which made "检测中" overlap the title.
+        row->setMinimumHeight(64);
+        title->setWordWrap(false);
+        (*value)->setWordWrap(false);
         column->addWidget(title);
         column->addWidget(*value);
         column->addWidget(*hint);
@@ -243,10 +248,10 @@ void DashboardPage::refresh()
         applyDoctor(context->environment(), QStringList());
 }
 
-void DashboardPage::applyDoctor(const QJsonObject &data, const QStringList &warnings)
+void DashboardPage::applyDoctor(const QJsonObject &doctor, const QStringList &warnings)
 {
     const Palette &palette = ThemeManager::instance()->palette();
-    const QJsonObject docker = data.value(QStringLiteral("docker")).toObject();
+    const QJsonObject docker = doctor.value(QStringLiteral("docker")).toObject();
     const bool cliFound = docker.value(QStringLiteral("cliFound")).toBool();
     const bool running = docker.value(QStringLiteral("daemonRunning")).toBool();
     const QString version = docker.value(QStringLiteral("version")).toString();
@@ -266,7 +271,7 @@ void DashboardPage::applyDoctor(const QJsonObject &data, const QStringList &warn
         m_dockerHint->setToolTip(rawError);
     }
 
-    const QJsonObject java = data.value(QStringLiteral("java")).toObject();
+    const QJsonObject java = doctor.value(QStringLiteral("java")).toObject();
     const QJsonArray images = java.value(QStringLiteral("images")).toArray();
     if (images.isEmpty()) {
         m_javaValue->setText(QStringLiteral("尚未准备"));
@@ -281,7 +286,7 @@ void DashboardPage::applyDoctor(const QJsonObject &data, const QStringList &warn
         m_javaHint->setText(labels.join(QStringLiteral(" · ")));
     }
 
-    const QJsonObject host = data.value(QStringLiteral("host")).toObject();
+    const QJsonObject host = doctor.value(QStringLiteral("host")).toObject();
     const QString home = host.value(QStringLiteral("dataRoot")).toString();
     if (!home.isEmpty()) {
         m_homeValue->setText(QStringLiteral("已就绪"));

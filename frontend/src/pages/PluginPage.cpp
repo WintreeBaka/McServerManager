@@ -114,6 +114,7 @@ void PluginPage::search()
     }
     const QString source = m_source->currentData().toString();
     const QString query = m_query->text().trimmed();
+    const QString searchingServer = m_serverId;
     m_statusLabel->setText(QStringLiteral("正在搜索…"));
     m_results->clear();
 
@@ -121,7 +122,9 @@ void PluginPage::search()
         {QStringLiteral("plugin"), QStringLiteral("search"), QStringLiteral("--id"), m_serverId,
          QStringLiteral("--source"), source, QStringLiteral("--query"), query,
          QStringLiteral("--limit"), QStringLiteral("25")},
-        this, [this, source](const Reply &reply) {
+        this, [this, source, searchingServer](const Reply &reply) {
+            if (searchingServer != m_serverId)
+                return;     // results belong to the previously selected server
             if (!reply.ok) {
                 m_statusLabel->setText(QStringLiteral("搜索失败：%1").arg(reply.errorText()));
                 return;
@@ -187,14 +190,17 @@ void PluginPage::installPlugin(const QJsonObject &hit)
 {
     if (m_serverId.isEmpty() || m_busy)
         return;
+    const QString installingServer = m_serverId;
     setBusy(true, QStringLiteral("正在下载…"));
     AppContext::instance()->backend()->request(
         {QStringLiteral("plugin"), QStringLiteral("install"), QStringLiteral("--id"), m_serverId,
          QStringLiteral("--source"), hit.value(QStringLiteral("source")).toString(),
          QStringLiteral("--slug"), hit.value(QStringLiteral("slug")).toString(),
          QStringLiteral("--title"), hit.value(QStringLiteral("title")).toString()},
-        this, [this, hit](const Reply &reply) {
+        this, [this, hit, installingServer](const Reply &reply) {
             setBusy(false);
+            if (installingServer != m_serverId)
+                return;
             if (!reply.ok) {
                 m_statusLabel->setText(QStringLiteral("安装失败：%1").arg(reply.errorText()));
                 AppContext::instance()->logActivity(
@@ -206,7 +212,7 @@ void PluginPage::installPlugin(const QJsonObject &hit)
             AppContext::instance()->logActivity(
                 QStringLiteral("已安装插件 %1").arg(hit.value(QStringLiteral("title")).toString()),
                 QStringLiteral("success"));
-            loadInstalled(m_serverId);
+            loadInstalled(installingServer);
         });
 }
 
@@ -216,7 +222,9 @@ void PluginPage::loadInstalled(const QString &serverId)
         return;
     AppContext::instance()->backend()->request(
         {QStringLiteral("plugin"), QStringLiteral("list"), QStringLiteral("--id"), serverId}, this,
-        [this](const Reply &reply) {
+        [this, serverId](const Reply &reply) {
+            if (serverId != m_serverId)
+                return;     // stale list for the previous server
             m_installed->clear();
             if (!reply.ok)
                 return;

@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
@@ -100,7 +101,7 @@ ConfigPage::ConfigPage(QWidget *parent)
         else
             saveExpert();
     });
-    connect(m_resetButton, &QPushButton::clicked, this, [this]() { loadServer(m_serverId); });
+    connect(m_resetButton, &QPushButton::clicked, this, [this]() { loadServer(m_serverId, true); });
 
     const QString current = AppContext::instance()->selectedServerId();
     if (!current.isEmpty())
@@ -328,16 +329,45 @@ void ConfigPage::buildFields(const QJsonArray &fields)
     }
 }
 
-void ConfigPage::loadServer(const QString &serverId)
+bool ConfigPage::isDirty() const
+{
+    if (!m_originalRaw.isEmpty() && m_expertEdit
+        && m_expertEdit->toPlainText() != m_originalRaw)
+        return true;
+    for (auto it = m_editors.constBegin(); it != m_editors.constEnd(); ++it) {
+        if (editorValue(it.key()) != m_originalValues.value(it.key()))
+            return true;
+    }
+    return false;
+}
+
+void ConfigPage::loadServer(const QString &serverId, bool force)
 {
     if (serverId.isEmpty())
         return;
+    // Never overwrite unsaved edits silently. Re-entering the same server keeps
+    // the editor; switching servers asks before discarding.
+    if (!force && serverId == m_serverId && isDirty())
+        return;
+    if (!force && serverId != m_serverId && !m_serverId.isEmpty() && isDirty()) {
+        const auto answer = QMessageBox::question(
+            this, QStringLiteral("未保存的修改"),
+            QStringLiteral("当前服务器的配置还有未保存的修改，切换服务器会丢弃它们。继续吗？"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes)
+            return;
+    }
     m_serverId = serverId;
+    m_originalRaw.clear();
     setStatus(QStringLiteral("正在读取配置…"));
 
     AppContext::instance()->backend()->request(
         {QStringLiteral("config"), QStringLiteral("read"), QStringLiteral("--id"), serverId}, this,
-        [this](const Reply &reply) {
+        [this, serverId](const Reply &reply) {
+            // A slow reply for the previous server must never overwrite the
+            // editor of the newly selected one (audit H4).
+            if (serverId != m_serverId)
+                return;
             if (!reply.ok) {
                 setStatus(QStringLiteral("读取失败：%1").arg(reply.errorText()), true);
                 return;
@@ -350,6 +380,7 @@ void ConfigPage::loadServer(const QString &serverId)
 
             const QString raw = reply.data.value(QStringLiteral("raw")).toString();
             m_expertEdit->setPlainText(raw);
+            m_originalRaw = raw;
             m_pathLabel->setText(reply.data.value(QStringLiteral("path")).toString());
             setStatus(QStringLiteral("已载入 %1 项配置 · %2")
                           .arg(values.size())
@@ -426,12 +457,15 @@ void ConfigPage::saveQuick()
     }
     setBusy(true);
     const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    const QString savingServer = m_serverId;
     AppContext::instance()->backend()->request(
-        {QStringLiteral("config"), QStringLiteral("apply"), QStringLiteral("--id"), m_serverId,
+        {QStringLiteral("config"), QStringLiteral("apply"), QStringLiteral("--id"), savingServer,
          QStringLiteral("--values"), json, QStringLiteral("--note"),
          QStringLiteral("快捷配置修改 %1 项").arg(changed)},
-        this, [this, changed](const Reply &reply) {
+        this, [this, changed, savingServer](const Reply &reply) {
             setBusy(false);
+            if (savingServer != m_serverId)
+                return;     // user switched servers while the save was running
             if (!reply.ok) {
                 setStatus(QStringLiteral("保存失败：%1").arg(reply.errorText()), true);
                 AppContext::instance()->logActivity(QStringLiteral("配置保存失败：%1").arg(reply.errorText()),
@@ -442,7 +476,7 @@ void ConfigPage::saveQuick()
             AppContext::instance()->logActivity(
                 QStringLiteral("已更新 %1 的配置（%2 项）").arg(m_serverId).arg(changed),
                 QStringLiteral("success"));
-            loadServer(m_serverId);
+            loadServer(m_serverId, true);
         });
 }
 
@@ -456,11 +490,14 @@ void ConfigPage::saveExpert()
         return;
     }
     setBusy(true);
+    const QString savingServer = m_serverId;
     AppContext::instance()->backend()->request(
-        {QStringLiteral("config"), QStringLiteral("raw"), QStringLiteral("--id"), m_serverId,
+        {QStringLiteral("config"), QStringLiteral("raw"), QStringLiteral("--id"), savingServer,
          QStringLiteral("--text"), text, QStringLiteral("--note"), QStringLiteral("专家模式编辑")},
-        this, [this](const Reply &reply) {
+        this, [this, savingServer](const Reply &reply) {
             setBusy(false);
+            if (savingServer != m_serverId)
+                return;
             if (!reply.ok) {
                 setStatus(QStringLiteral("保存失败：%1").arg(reply.errorText()), true);
                 return;
@@ -469,7 +506,7 @@ void ConfigPage::saveExpert()
             setStatus(QStringLiteral("专家模式内容已保存（%1 处变更），旧版本已备份").arg(count));
             AppContext::instance()->logActivity(
                 QStringLiteral("专家模式保存了 %1 的配置").arg(m_serverId), QStringLiteral("success"));
-            loadServer(m_serverId);
+            loadServer(m_serverId, true);
         });
 }
 

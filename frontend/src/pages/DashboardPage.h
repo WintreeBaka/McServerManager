@@ -33,7 +33,7 @@ private:
     QWidget *buildStats();
     QWidget *buildEnvironmentCard();
     QWidget *buildActivityCard();
-    void applyDoctor(const QJsonObject &data, const QStringList &warnings);
+    void applyDoctor(const QJsonObject &doctor, const QStringList &warnings);
     QString healthText() const;
 
     StatCard *m_totalCard = nullptr;

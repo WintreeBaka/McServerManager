@@ -217,6 +217,10 @@ QString ServerLifecycle::runtimeState(const ServerRecord &record)
         return QStringLiteral("stopped");
     }
     const QString state = DockerManager::containerState(record.id);
+    // A failed docker query is not "stopped": keep the last known status instead
+    // of showing a running server as stopped (and then letting start() kill it).
+    if (state == QLatin1String("unknown"))
+        return QStringLiteral("unknown");
     if (state == QLatin1String("running"))
         return QStringLiteral("running");
     if (state == QLatin1String("restarting"))
@@ -452,6 +456,34 @@ StartOutcome ServerLifecycle::startRecord(ServerStore &store, const QString &id,
         return outcome;
     }
 
+    // H1: starting an already running server must be a no-op, never a rebuild.
+    // (docker rm -f before run would kick every player and lose unsaved world data)
+    const ContainerState current = DockerManager::inspectState(record.id);
+    if (!current.ok) {
+        outcome.status = QStringLiteral("error");
+        outcome.message = QStringLiteral("无法查询容器状态");
+        outcome.hint = current.error;
+        record.status = QStringLiteral("error");
+        record.lastError = outcome.message;
+        store.update(record);
+        return outcome;
+    }
+    if (current.state == QLatin1String("running") || current.state == QLatin1String("paused")) {
+        outcome.ok = true;
+        outcome.status = QStringLiteral("running");
+        outcome.message = QStringLiteral("服务器已在运行");
+        record.status = QStringLiteral("running");
+        store.update(record);
+        return outcome;
+    }
+    if (current.state == QLatin1String("restarting")) {
+        outcome.status = QStringLiteral("error");
+        outcome.message = QStringLiteral("服务器正在重启，请稍后再试");
+        record.status = QStringLiteral("restarting");
+        store.update(record);
+        return outcome;
+    }
+
     QString imageError;
     if (!DockerManager::ensureImage(record.image, &imageError)) {
         outcome.status = QStringLiteral("error");
@@ -666,6 +698,13 @@ Result ServerLifecycle::stopRecord(ServerStore &store, ServerRecord record, bool
     }
 
     const QString state = DockerManager::containerState(id);
+    if (state == QLatin1String("unknown")) {
+        // docker could not be queried (daemon restarting, timeout): do not claim
+        // the server stopped - that would let a later start() rebuild it.
+        return Result::fail(QStringLiteral("DOCKER_UNAVAILABLE"),
+                            QStringLiteral("无法确认容器状态，未执行停止"),
+                            QStringLiteral("请确认 Docker Desktop 正在运行后重试"));
+    }
     if (state == QLatin1String("missing")) {
         record.status = QStringLiteral("stopped");
         store.update(record);

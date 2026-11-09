@@ -306,8 +306,14 @@ void AppContext::setSelectedServerId(const QString &id)
 
 void AppContext::refreshServers(std::function<void(bool, const QString &)> done)
 {
+    const quint64 seq = ++m_serverListSeq;
     m_backend->request({QStringLiteral("server"), QStringLiteral("list")}, this,
-                       [this, done](const Reply &reply) {
+                       [this, done, seq](const Reply &reply) {
+                           if (seq != m_serverListSeq) {
+                               if (done)
+                                   done(false, QStringLiteral("已被更新的请求取代"));
+                               return;
+                           }
                            if (!reply.ok) {
                                emit serversRefreshed(false, reply.errorText());
                                if (done)
@@ -402,13 +408,23 @@ void AppContext::startScheduler()
     // The daemon writes one JSON line per tick; forwarding avoids ever blocking
     // it on an unread pipe.
     process->setProcessChannelMode(QProcess::ForwardedChannels);
-    process->start();
-    if (!process->waitForStarted(8000)) {
-        logActivity(QStringLiteral("定时备份守护进程启动失败"), QStringLiteral("error"));
-        delete process;
-        return;
-    }
+    // Never block the UI while a slow disk / AV scanner starts the process.
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            logActivity(QStringLiteral("定时备份守护进程启动失败"), QStringLiteral("error"));
+            if (m_daemon == process)
+                m_daemon.clear();
+            process->deleteLater();
+        }
+    });
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, process](int, QProcess::ExitStatus) {
+                if (m_daemon == process)
+                    m_daemon.clear();
+                process->deleteLater();
+            });
     m_daemon = process;
+    process->start();
 }
 
 void AppContext::stopScheduler()
@@ -416,7 +432,6 @@ void AppContext::stopScheduler()
     if (!m_daemon)
         return;
     m_daemon->kill();
-    m_daemon->waitForFinished(3000);
     m_daemon.clear();
 }
 
@@ -433,7 +448,14 @@ void AppContext::onPoll()
     // Docker that was started after the app keeps showing correctly
     if (++m_pollTicks % 4 == 1)
         refreshEnvironment();
-    m_backend->request({QStringLiteral("server"), QStringLiteral("list")}, this, [this](const Reply &reply) {
+    if (m_pollInFlight)
+        return;     // docker is slow: never stack overlapping poll requests
+    m_pollInFlight = true;
+    const quint64 seq = ++m_serverListSeq;
+    m_backend->request({QStringLiteral("server"), QStringLiteral("list")}, this, [this, seq](const Reply &reply) {
+        m_pollInFlight = false;
+        if (seq != m_serverListSeq)
+            return;
         if (!reply.ok)
             return;
         const QJsonArray array = reply.data.value(QStringLiteral("servers")).toArray();

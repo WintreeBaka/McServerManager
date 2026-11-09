@@ -172,7 +172,9 @@ void BackupPage::loadBackups(const QString &serverId)
         return;
     AppContext::instance()->backend()->request(
         {QStringLiteral("backup"), QStringLiteral("list"), QStringLiteral("--id"), serverId}, this,
-        [this](const Reply &reply) {
+        [this, serverId](const Reply &reply) {
+            if (serverId != m_serverId)
+                return;     // user switched servers while the list was loading
             m_list->clear();
             if (!reply.ok) {
                 m_statsLabel->setText(QStringLiteral("读取失败：%1").arg(reply.errorText()));

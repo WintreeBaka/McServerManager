@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSet>
 
 #include "config/ConfigSchema.h"
@@ -21,16 +22,39 @@ const char *kIndexFile = "index.json";
 bool writeTextLf(const QString &path, const QString &content, QString *error)
 {
     QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    // QSaveFile writes to a temporary file and renames on commit: a crash or a
+    // full disk can never leave a half written server.properties behind.
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
         if (error)
             *error = QStringLiteral("cannot write %1").arg(path);
         return false;
     }
     QByteArray bytes = content.toUtf8();
     bytes.replace("\r\n", "\n");
-    file.write(bytes);
-    file.close();
+    if (file.write(bytes) != bytes.size() || !file.commit()) {
+        if (error)
+            *error = QStringLiteral("cannot commit %1").arg(path);
+        return false;
+    }
+    return true;
+}
+
+/// server.properties is line based: a newline or an `=`/`:` inside a key would
+/// silently inject another property (e.g. turning enable-rcon off).
+bool isSafePropertyPair(const QString &key, const QString &value, QString *why)
+{
+    static const QRegularExpression keyPattern(QStringLiteral("^[A-Za-z0-9._-]+$"));
+    if (!keyPattern.match(key).hasMatch()) {
+        if (why)
+            *why = QStringLiteral("非法的配置键：%1").arg(key);
+        return false;
+    }
+    if (value.contains(QLatin1Char('\n')) || value.contains(QLatin1Char('\r'))) {
+        if (why)
+            *why = QStringLiteral("配置值不能包含换行：%1").arg(key);
+        return false;
+    }
     return true;
 }
 
@@ -266,6 +290,15 @@ bool ConfigManager::applyValues(const ServerRecord &record,
 {
     const QString path = record.propertiesPath();
     QDir().mkpath(record.dir);
+
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+        QString why;
+        if (!isSafePropertyPair(it.key(), it.value(), &why)) {
+            if (error)
+                *error = why;
+            return false;
+        }
+    }
 
     const QMap<QString, QString> before = readProperties(path);
     QStringList lines = StringUtil::splitLines(readRaw(path));

@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QTextStream>
 
 #include "config/ConfigSchema.h"
@@ -20,16 +22,19 @@ namespace {
 bool writeLf(const QString &path, const QString &content, QString *error)
 {
     QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
         if (error)
             *error = QStringLiteral("cannot write %1").arg(path);
         return false;
     }
     QByteArray bytes = content.toUtf8();
     bytes.replace("\r\n", "\n");
-    file.write(bytes);
-    file.close();
+    if (file.write(bytes) != bytes.size() || !file.commit()) {
+        if (error)
+            *error = QStringLiteral("cannot commit %1").arg(path);
+        return false;
+    }
     return true;
 }
 
@@ -37,8 +42,8 @@ bool writeLf(const QString &path, const QString &content, QString *error)
 bool writeCrlf(const QString &path, const QString &content, QString *error)
 {
     QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
         if (error)
             *error = QStringLiteral("cannot write %1").arg(path);
         return false;
@@ -46,9 +51,49 @@ bool writeCrlf(const QString &path, const QString &content, QString *error)
     QString text = content;
     text.replace(QLatin1String("\r\n"), QLatin1String("\n"));
     text.replace(QLatin1String("\n"), QLatin1String("\r\n"));
-    file.write(text.toUtf8());
-    file.close();
+    const QByteArray bytes = text.toUtf8();
+    if (file.write(bytes) != bytes.size() || !file.commit()) {
+        if (error)
+            *error = QStringLiteral("cannot commit %1").arg(path);
+        return false;
+    }
     return true;
+}
+
+/// Host-mode launch scripts are executed by cmd.exe /bin/sh. Values coming from
+/// `install --memory`, `--java-options` or `server update` are therefore a shell
+/// injection surface - keep only characters needed by JVM flags.
+QString safeJvmOptions(const QString &raw)
+{
+    static const QRegularExpression allowed(QStringLiteral("^[A-Za-z0-9_.:+=,/@\\-]+$"));
+    QStringList kept;
+    QStringList dropped;
+    const QStringList tokens = raw.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    for (const QString &token : tokens) {
+        if (allowed.match(token).hasMatch())
+            kept << token;
+        else
+            dropped << token;
+    }
+    if (!dropped.isEmpty())
+        Logger::warn(QStringLiteral("template"),
+                     QStringLiteral("dropped unsafe host JVM option(s): %1")
+                         .arg(StringUtil::ellipsize(dropped.join(QLatin1Char(' ')), 160)));
+    return kept.join(QLatin1Char(' '));
+}
+
+QString safeMemory(const QString &raw)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[0-9]{1,5}[MG]$"));
+    const QString value = raw.trimmed().toUpper();
+    return pattern.match(value).hasMatch() ? value : QStringLiteral("4G");
+}
+
+QString safeJarName(const QString &raw)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9._-]+\\.jar$"));
+    const QString value = QFileInfo(raw).fileName();
+    return pattern.match(value).hasMatch() ? value : QStringLiteral("server.jar");
 }
 
 } // namespace
@@ -162,12 +207,11 @@ QString TemplateWriter::hostStartScriptName()
 
 QString TemplateWriter::hostStartScriptContent(const ServerRecord &record)
 {
-    const QString jarName = record.jarName.isEmpty() ? QStringLiteral("server.jar") : record.jarName;
-    const QString memory = record.memory.isEmpty() ? QStringLiteral("4G") : record.memory;
+    const QString jarName = safeJarName(record.jarName);
+    const QString memory = safeMemory(record.memory);
     // backend plugins can append JVM flags through the server.beforeStart hook
-    const QString options = QStringLiteral("%1 %2")
-                                .arg(record.effectiveJavaOptions(), pluginJvmArgs(record))
-                                .simplified();
+    const QString options = safeJvmOptions(
+        QStringLiteral("%1 %2").arg(record.effectiveJavaOptions(), pluginJvmArgs(record)));
     const QString comment = QStringLiteral(
         "experimental host runtime: this server runs directly on this machine with the JDK "
         "that was cloned into ./jdk when it was created.");

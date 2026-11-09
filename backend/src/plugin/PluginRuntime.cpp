@@ -41,6 +41,45 @@ bool processAlive(qint64 pid)
 #endif
 }
 
+/// Image name of a running process (empty when it cannot be determined).
+QString processImageName(qint64 pid)
+{
+    if (pid <= 0)
+        return QString();
+#ifdef Q_OS_WIN
+    const ProcessResult result =
+        ProcessRunner::run(QStringLiteral("tasklist"),
+                           {QStringLiteral("/FI"), QStringLiteral("PID eq %1").arg(pid),
+                            QStringLiteral("/FO"), QStringLiteral("CSV"),
+                            QStringLiteral("/NH")},
+                           20000);
+    // "image.exe","1234","Console",...
+    const QString text = result.stdOut.trimmed();
+    const int first = text.indexOf(QLatin1Char('"'));
+    const int second = first >= 0 ? text.indexOf(QLatin1Char('"'), first + 1) : -1;
+    if (first >= 0 && second > first)
+        return text.mid(first + 1, second - first - 1).trimmed();
+    return QString();
+#else
+    QFile file(QStringLiteral("/proc/%1/comm").arg(pid));
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromUtf8(file.readAll()).trimmed();
+#endif
+}
+
+/// A PID alone can be reused by an unrelated process; require the recorded
+/// executable name to match before we treat it as "our" service / kill it.
+bool servicePidMatches(qint64 pid, const QString &image)
+{
+    if (pid <= 0 || !processAlive(pid))
+        return false;
+    if (image.isEmpty())
+        return true;
+    const QString actual = processImageName(pid);
+    return actual.isEmpty() || actual.compare(image, Qt::CaseInsensitive) == 0;
+}
+
 bool portOpen(quint16 port)
 {
     if (port == 0)
@@ -485,7 +524,7 @@ Result PluginRuntime::serviceStart(const QString &pluginId)
 
     const QJsonObject existing = serviceFile(manifest.id);
     const qint64 existingPid = qint64(existing.value(QStringLiteral("pid")).toDouble());
-    if (existingPid > 0 && processAlive(existingPid))
+    if (existingPid > 0 && servicePidMatches(existingPid, existing.value(QStringLiteral("image")).toString()))
         return Result::ok(QJsonObject {{QStringLiteral("alreadyRunning"), true},
                                        {QStringLiteral("pid"), double(existingPid)},
                                        {QStringLiteral("url"),
@@ -519,13 +558,22 @@ Result PluginRuntime::serviceStart(const QString &pluginId)
     QJsonObject record;
     record.insert(QStringLiteral("id"), manifest.id);
     record.insert(QStringLiteral("pid"), double(pid));
+    record.insert(QStringLiteral("image"), QFileInfo(launch.program).fileName());
     record.insert(QStringLiteral("port"), port);
     record.insert(QStringLiteral("entry"), service);
     record.insert(QStringLiteral("url"), port > 0
                                             ? QStringLiteral("http://127.0.0.1:%1/").arg(port)
                                             : QString());
     record.insert(QStringLiteral("startedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
-    writeServiceFile(manifest.id, record);
+    if (!writeServiceFile(manifest.id, record)) {
+        // do not leave an untracked service process behind
+        ProcessRunner::run(QStringLiteral("taskkill"),
+                           {QStringLiteral("/PID"), QString::number(pid),
+                            QStringLiteral("/T"), QStringLiteral("/F")},
+                           20000);
+        return Result::fail(QStringLiteral("IO_ERROR"),
+                            QStringLiteral("无法写入插件服务状态，已终止刚启动的进程"));
+    }
 
     QJsonObject data = record;
     data.insert(QStringLiteral("command"), QStringLiteral("%1 %2")
@@ -544,14 +592,27 @@ Result PluginRuntime::serviceStop(const QString &pluginId)
     const qint64 pid = qint64(record.value(QStringLiteral("pid")).toDouble());
     bool stopped = false;
     if (pid > 0 && processAlive(pid)) {
+        if (!servicePidMatches(pid, record.value(QStringLiteral("image")).toString())) {
+            // The PID now belongs to an unrelated program: never kill it.
+            writeServiceFile(manifest.id, QJsonObject());
+            return Result::fail(QStringLiteral("SERVICE_PID_REUSED"),
+                                QStringLiteral("记录的 PID 已被其它程序占用，已清理状态但未结束该进程"),
+                                QStringLiteral("pid=%1").arg(pid));
+        }
         const ProcessResult result =
             ProcessRunner::run(QStringLiteral("taskkill"),
                                {QStringLiteral("/PID"), QString::number(pid),
                                 QStringLiteral("/T"), QStringLiteral("/F")},
                                30000);
         stopped = result.ok() || !processAlive(pid);
+        if (!stopped) {
+            return Result::fail(QStringLiteral("STOP_FAILED"),
+                                QStringLiteral("无法停止插件服务进程"), result.errorText());
+        }
     }
-    writeServiceFile(manifest.id, QJsonObject());
+    if (!writeServiceFile(manifest.id, QJsonObject()))
+        return Result::fail(QStringLiteral("IO_ERROR"),
+                            QStringLiteral("服务已停止，但无法清除 service.json"));
     return Result::ok(QJsonObject {{QStringLiteral("id"), manifest.id},
                                    {QStringLiteral("stopped"), stopped},
                                    {QStringLiteral("pid"), double(pid)}});
@@ -566,12 +627,13 @@ Result PluginRuntime::serviceStatus(const QString &pluginId)
     const QJsonObject record = serviceFile(manifest.id);
     const qint64 pid = qint64(record.value(QStringLiteral("pid")).toDouble());
     const int port = record.value(QStringLiteral("port")).toInt();
-    const bool alive = processAlive(pid);
+    const bool alive = servicePidMatches(pid, record.value(QStringLiteral("image")).toString());
     const bool listening = portOpen(quint16(port));
     QJsonObject data = record;
     data.insert(QStringLiteral("id"), manifest.id);
     data.insert(QStringLiteral("name"), manifest.name);
     data.insert(QStringLiteral("running"), alive || listening);
+    data.insert(QStringLiteral("pidAlive"), alive);
     data.insert(QStringLiteral("listening"), listening);
     data.insert(QStringLiteral("declared"), !Json::str(manifest.web, QStringLiteral("service")).isEmpty());
     data.insert(QStringLiteral("hasPanel"), !manifest.webEntry().isEmpty());

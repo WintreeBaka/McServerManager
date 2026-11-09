@@ -36,10 +36,6 @@ public:
                                 QObject *parent = nullptr,
                                 bool mergeChannels = false);
 
-    static QProcess *startDetached(const QString &program,
-                                   const QStringList &arguments,
-                                   const QString &workingDirectory = QString());
-
     static bool startDetachedOk(const QString &program,
                                 const QStringList &arguments,
                                 const QString &workingDirectory = QString(),

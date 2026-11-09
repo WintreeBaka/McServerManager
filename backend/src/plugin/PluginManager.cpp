@@ -9,6 +9,7 @@
 #include <QUrlQuery>
 
 #include "core/AppPaths.h"
+#include "core/Archive.h"
 #include "core/Logger.h"
 #include "core/StringUtil.h"
 #include "net/HttpClient.h"
@@ -19,6 +20,17 @@ namespace {
 const char *kModrinthApi = "https://api.modrinth.com/v2";
 const char *kHangarApi = "https://hangar.papermc.io/api/v1";
 const char *kSpigetApi = "https://api.spiget.org/v2";
+
+/// A Minecraft plugin file must be a plain jar name inside <server>/plugins.
+/// Remote metadata (Modrinth/Hangar filename) and the CLI --file flag are
+/// untrusted: without this a value like ..\..\Startup\x.cmd escapes the folder.
+QString safePluginFileName(const QString &raw)
+{
+    const QString name = QFileInfo(raw).fileName().trimmed();
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9._-]+\\.jar$"),
+                                            QRegularExpression::CaseInsensitiveOption);
+    return pattern.match(name).hasMatch() ? name : QString();
+}
 
 QJsonObject fetchJson(const QUrl &url, QString *error)
 {
@@ -336,11 +348,18 @@ Result PluginManager::install(const ServerRecord &record, const PluginHit &hit)
         return Result::fail(QStringLiteral("PLUGIN_RESOLVE_FAILED"),
                             QStringLiteral("无法解析插件下载地址"), resolveError);
 
-    const QString fileName = resolved.fileName.isEmpty()
-                                 ? StringUtil::slugify(resolved.title) + QStringLiteral(".jar")
-                                 : resolved.fileName;
+    QString fileName = safePluginFileName(resolved.fileName);
+    if (fileName.isEmpty())
+        fileName = safePluginFileName(StringUtil::slugify(resolved.title) + QStringLiteral(".jar"));
+    if (fileName.isEmpty())
+        return Result::fail(QStringLiteral("INVALID_FILE_NAME"),
+                            QStringLiteral("插件文件名不合法，已拒绝下载"),
+                            QStringLiteral("只允许 [A-Za-z0-9._-]+.jar，且必须位于服务器 plugins 目录内"));
     const QString target = QDir(record.pluginDir()).filePath(fileName);
     QDir().mkpath(record.pluginDir());
+    if (!Archive::isInside(record.pluginDir(), target))
+        return Result::fail(QStringLiteral("UNSAFE_PLUGIN_PATH"),
+                            QStringLiteral("插件目标路径越界，已拒绝下载"), target);
 
     QString downloadError;
     if (!HttpClient::download(QUrl(resolved.downloadUrl), target, &downloadError)) {
@@ -379,7 +398,16 @@ QVector<InstalledPlugin> PluginManager::installed(const ServerRecord &record)
 
 Result PluginManager::setEnabled(const ServerRecord &record, const QString &file, bool enabled)
 {
-    const QString source = QDir(record.pluginDir()).filePath(file);
+    QString base = file.trimmed();
+    const bool disabledSuffix = base.endsWith(QLatin1String(".disabled"), Qt::CaseInsensitive);
+    if (disabledSuffix)
+        base.chop(int(qstrlen(".disabled")));
+    const QString safe = safePluginFileName(base);
+    if (safe.isEmpty())
+        return Result::fail(QStringLiteral("INVALID_FILE_NAME"),
+                            QStringLiteral("插件文件名不合法：%1").arg(file));
+    const QString name = disabledSuffix ? safe + QStringLiteral(".disabled") : safe;
+    const QString source = QDir(record.pluginDir()).filePath(name);
     if (!QFileInfo::exists(source))
         return Result::fail(QStringLiteral("NOT_FOUND"), QStringLiteral("插件 %1 不存在").arg(file));
     QString target;
@@ -400,7 +428,17 @@ Result PluginManager::setEnabled(const ServerRecord &record, const QString &file
 
 Result PluginManager::remove(const ServerRecord &record, const QString &file)
 {
-    const QString path = QDir(record.pluginDir()).filePath(file);
+    QString base = file.trimmed();
+    if (base.endsWith(QLatin1String(".disabled"), Qt::CaseInsensitive))
+        base.chop(int(qstrlen(".disabled")));
+    const QString safe = safePluginFileName(base);
+    if (safe.isEmpty())
+        return Result::fail(QStringLiteral("INVALID_FILE_NAME"),
+                            QStringLiteral("插件文件名不合法：%1").arg(file));
+    const QString path = QDir(record.pluginDir()).filePath(
+        file.endsWith(QLatin1String(".disabled"), Qt::CaseInsensitive)
+            ? safe + QStringLiteral(".disabled")
+            : safe);
     if (!QFileInfo::exists(path))
         return Result::fail(QStringLiteral("NOT_FOUND"), QStringLiteral("插件 %1 不存在").arg(file));
     if (!QFile::remove(path))

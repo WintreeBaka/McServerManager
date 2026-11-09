@@ -288,14 +288,14 @@ void GradientButton::paintEvent(QPaintEvent *event)
         gradient.setColorAt(1.0, ThemeManager::isFlat() ? p.danger : blend(p.danger, p.pink, 0.4));
     } else {
         const QPair<QColor, QColor> colors = ThemeManager::accentColors(p);
-        const qreal lift = m_glowProgress * 0.12;
-        gradient.setColorAt(0.0, blend(colors.first, QColor(255, 255, 255), lift));
-        gradient.setColorAt(1.0, blend(colors.second, QColor(255, 255, 255), lift));
+        const qreal buttonLift = m_glowProgress * 0.12;
+        gradient.setColorAt(0.0, blend(colors.first, QColor(255, 255, 255), buttonLift));
+        gradient.setColorAt(1.0, blend(colors.second, QColor(255, 255, 255), buttonLift));
     }
     if (!enabled) {
-        const QPair<QColor, QColor> colors = ThemeManager::accentColors(p);
-        gradient.setColorAt(0.0, blend(colors.first, p.surface, 0.7));
-        gradient.setColorAt(1.0, blend(colors.second, p.surface, 0.7));
+        const QPair<QColor, QColor> flatColors = ThemeManager::accentColors(p);
+        gradient.setColorAt(0.0, blend(flatColors.first, p.surface, 0.7));
+        gradient.setColorAt(1.0, blend(flatColors.second, p.surface, 0.7));
     }
 
     if (isDown())
