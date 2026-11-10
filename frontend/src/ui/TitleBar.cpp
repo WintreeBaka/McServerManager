@@ -52,6 +52,11 @@ TitleBar::TitleBar(QWidget *parent)
     m_title = makeLabel(QStringLiteral("我的世界服务器管理器"), QStringLiteral("subtitle"), textColumn);
     m_subtitle = makeLabel(QStringLiteral("Docker 化运行环境 · 一键配置"), QStringLiteral("caption"),
                            textColumn);
+    // The bar has a fixed height: a wrapped line is not shown on a second row, it is
+    // clipped by the bar. Keep both lines single-line so the layout gives the column
+    // the width the text actually needs.
+    m_title->setWordWrap(false);
+    m_subtitle->setWordWrap(false);
     m_title->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     m_subtitle->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     textColumn->setAttribute(Qt::WA_TransparentForMouseEvents, true);

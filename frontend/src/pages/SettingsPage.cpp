@@ -86,7 +86,15 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     AppContext *context = AppContext::instance();
     connect(context, &AppContext::themeChanged, this, [this]() {
+        // Reflect the new palette in both switches without pretending the user clicked
+        // them. An unguarded setCurrentIndex made the theme segment emit currentChanged,
+        // which logged a bogus "已切换到…" notice: changing the colour style therefore
+        // popped two toasts (one real, one invented).
+        m_syncingAppearance = true;
         m_themeSwitch->setCurrentIndex(ThemeManager::instance()->isDark() ? 0 : 1, false);
+        m_accentSwitch->setCurrentIndex(
+            ThemeManager::instance()->accentStyle() == ThemeManager::AccentStyle::Flat ? 1 : 0, false);
+        m_syncingAppearance = false;
     });
     connect(context, &AppContext::experimentalChanged, this, [this](bool) {
         updateNavState();

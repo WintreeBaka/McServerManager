@@ -473,8 +473,11 @@ void SegmentedControl::setCurrentIndex(int index, bool animate)
     if (m_items.isEmpty())
         return;
     const int clamped = qBound(0, index, m_items.size() - 1);
-    if (clamped == m_current && animate) {
-        update();
+    if (clamped == m_current) {
+        // Selecting the value that is already active is not a change: emitting here made
+        // programmatic syncing look like a user choice (and produced phantom toasts).
+        if (animate)
+            update();
         return;
     }
     m_current = clamped;
