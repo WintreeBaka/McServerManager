@@ -1,4 +1,4 @@
-﻿<#
+<#
     创建 Gitea Release 并上传附件（与 create-release.ps1 对应）。
 
     需要一个 Gitea 访问令牌（设置 → 应用 → 生成令牌，至少 repository 读写）：
@@ -6,7 +6,7 @@
         $env:GITEA_TOKEN = "xxxxxxxx"
         .\tools\create-gitea-release.ps1
 
-    默认发布 v1.1.3 到 http://192.168.1.82:3000/w/McServerManager，
+    默认发布 v1.1.4 到 http://192.168.1.82:3000/w/McServerManager，
     附件：GUI 便携版、纯 CLI 精简版、PLUGIN-SDK.md、官方玩家管理插件。
     已存在同名 Release 时会复用并补传缺失附件。
 #>
@@ -14,7 +14,7 @@ param(
     [string]$BaseUrl = "http://192.168.1.82:3000",
     [string]$Owner = "w",
     [string]$Repo = "McServerManager",
-    [string]$Version = "1.1.3",
+    [string]$Version = "1.1.4",
     [string]$Tag = "",
     [string]$Title = "",
     [string]$NotesFile = "",

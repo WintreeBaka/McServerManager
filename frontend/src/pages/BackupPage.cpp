@@ -1,6 +1,7 @@
 #include "pages/BackupPage.h"
 
 #include <QDateTime>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QLabel>
@@ -9,7 +10,9 @@
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QSpinBox>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "app/AppContext.h"
@@ -157,12 +160,20 @@ QWidget *BackupPage::buildListCard()
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->setSpacing(6);
     m_list->setStyleSheet(QStringLiteral("QListWidget { background: transparent; border: none; }"));
+    m_list->viewport()->installEventFilter(this);
     layout->addWidget(m_list, 1);
     m_emptyHint = makeLabel(QStringLiteral("还没有备份，点击“立即创建备份”生成第一份快照。"),
                             QStringLiteral("hint"), card);
     layout->addWidget(m_emptyHint);
 
-    connect(refresh, &QPushButton::clicked, this, [this]() { loadBackups(m_serverId); });
+    connect(refresh, &QPushButton::clicked, this, [this]() {
+        if (m_serverId.isEmpty()) {
+            m_statsLabel->setText(QStringLiteral("先在“服务器”页选择一台服务器，再刷新备份列表"));
+            return;
+        }
+        m_statsLabel->setText(QStringLiteral("正在刷新备份列表…"));
+        loadBackups(m_serverId);
+    });
     return card;
 }
 
@@ -241,10 +252,13 @@ void BackupPage::loadBackups(const QString &serverId)
                 connect(restore, &QPushButton::clicked, this, [this, name]() { restoreBackup(name); });
                 connect(remove, &QPushButton::clicked, this, [this, name]() { deleteBackup(name); });
 
-                item->setSizeHint(widget->sizeHint());
                 m_list->setItemWidget(item, widget);
             }
             m_emptyHint->setVisible(backups.isEmpty());
+            // rows are measured for the width the list ended up with, after the widgets
+            // are in the view; a pre-measured hint clipped the bottom of short rows
+            relayoutBackupRows();
+            QTimer::singleShot(0, this, [this]() { relayoutBackupRows(); });
         });
 }
 
@@ -389,12 +403,50 @@ void BackupPage::setBusy(bool busy, const QString &message)
         m_statsLabel->setText(message);
 }
 
+void BackupPage::relayoutBackupRows()
+{
+    if (!m_list)
+        return;
+    // Rows are measured for the width they actually get, because the meta label wraps.
+    // A hint taken before the row was reparented into the view left it too short and
+    // cut off the bottom of the action buttons.
+    const int width = qMax(160, m_list->viewport()->width() - 2);
+    for (int i = 0; i < m_list->count(); ++i) {
+        QListWidgetItem *item = m_list->item(i);
+        QWidget *row = m_list->itemWidget(item);
+        if (!item || !row)
+            continue;
+        int height = row->layout() ? row->layout()->heightForWidth(width) : -1;
+        if (height <= 0)
+            height = row->sizeHint().height();
+        const QSize wanted(width, height);
+        if (item->sizeHint() != wanted)
+            item->setSizeHint(wanted);
+    }
+}
+
+void BackupPage::resizeEvent(QResizeEvent *event)
+{
+    PageBase::resizeEvent(event);
+    relayoutBackupRows();
+}
+
+bool BackupPage::eventFilter(QObject *watched, QEvent *event)
+{
+    if (m_list && watched == m_list->viewport() && event->type() == QEvent::Resize)
+        relayoutBackupRows();
+    return PageBase::eventFilter(watched, event);
+}
+
 void BackupPage::onActivated()
 {
     const QString id = AppContext::instance()->selectedServerId();
+    if (id.isEmpty())
+        return;
     const bool changed = id != m_serverId;
-    if (!id.isEmpty()
-        && (changed || AppContext::instance()->throttle(QStringLiteral("backup-list"), 2000)))
+    // the reply guard compares against m_serverId, so keep it in sync before loading
+    m_serverId = id;
+    if (changed || AppContext::instance()->throttle(QStringLiteral("backup-list"), 2000))
         loadBackups(id);
 }
 

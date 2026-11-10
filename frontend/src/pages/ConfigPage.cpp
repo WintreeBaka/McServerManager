@@ -3,6 +3,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QJsonDocument>
@@ -13,8 +14,10 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QSpinBox>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "app/AppContext.h"
@@ -178,13 +181,21 @@ QWidget *ConfigPage::buildHistoryCard()
     m_historyList->setFrameShape(QFrame::NoFrame);
     m_historyList->setSpacing(6);
     m_historyList->setStyleSheet(QStringLiteral("QListWidget { background: transparent; border: none; }"));
+    m_historyList->viewport()->installEventFilter(this);
     layout->addWidget(m_historyList, 1);
 
     m_historyHint = makeLabel(QStringLiteral("还没有备份记录，保存一次配置后即可回滚。"),
                               QStringLiteral("hint"), card);
     layout->addWidget(m_historyHint);
 
-    connect(refresh, &QPushButton::clicked, this, [this]() { loadHistory(m_serverId); });
+    connect(refresh, &QPushButton::clicked, this, [this]() {
+        if (m_serverId.isEmpty()) {
+            setStatus(QStringLiteral("先在“服务器”页选择一台服务器，再刷新配置备份"), true);
+            return;
+        }
+        setStatus(QStringLiteral("正在刷新配置备份…"));
+        loadHistory(m_serverId, true);
+    });
     connect(m_historyList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
         const QString id = item->data(Qt::UserRole).toString();
         if (!id.isEmpty())
@@ -538,16 +549,21 @@ void ConfigPage::validateExpert()
         });
 }
 
-void ConfigPage::loadHistory(const QString &serverId)
+void ConfigPage::loadHistory(const QString &serverId, bool userInitiated)
 {
     if (serverId.isEmpty() || !m_historyList)
         return;
     AppContext::instance()->backend()->request(
         {QStringLiteral("config"), QStringLiteral("backups"), QStringLiteral("--id"), serverId}, this,
-        [this](const Reply &reply) {
+        [this, serverId, userInitiated](const Reply &reply) {
+            if (serverId != m_serverId)
+                return;     // user switched servers while the list was loading
             m_historyList->clear();
-            if (!reply.ok)
+            if (!reply.ok) {
+                if (userInitiated)
+                    setStatus(QStringLiteral("刷新失败：%1").arg(reply.errorText()), true);
                 return;
+            }
             const QJsonArray backups = reply.data.value(QStringLiteral("backups")).toArray();
             for (const QJsonValue &value : backups) {
                 const QJsonObject backup = value.toObject();
@@ -587,11 +603,16 @@ void ConfigPage::loadHistory(const QString &serverId)
                 layout->addLayout(actions);
                 connect(rollback, &QPushButton::clicked, this, [this, id]() { rollbackTo(id); });
 
-                item->setSizeHint(widget->sizeHint());
                 m_historyList->setItemWidget(item, widget);
             }
             if (m_historyHint)
                 m_historyHint->setVisible(backups.isEmpty());
+            // the row height depends on the width the list ends up with, so measure
+            // after the widgets are in the view (and once more after the polish pass)
+            relayoutHistoryRows();
+            QTimer::singleShot(0, this, [this]() { relayoutHistoryRows(); });
+            if (userInitiated)
+                setStatus(QStringLiteral("配置备份已刷新 · 共 %1 条记录").arg(backups.size()));
         });
 }
 
@@ -632,6 +653,42 @@ void ConfigPage::setBusy(bool busy)
     m_busy = busy;
     m_saveButton->setEnabled(!busy);
     m_saveButton->setText(busy ? QStringLiteral("处理中…") : QStringLiteral("保存并备份"));
+}
+
+void ConfigPage::relayoutHistoryRows()
+{
+    if (!m_historyList)
+        return;
+    // The row widgets live inside the list's viewport, so their height depends on the
+    // width that is actually available (the note label wraps). A hint measured before
+    // the widget was reparented left long rows too short, which clipped the bottom of
+    // the "回滚到此版本" button.
+    const int width = qMax(160, m_historyList->viewport()->width() - 2);
+    for (int i = 0; i < m_historyList->count(); ++i) {
+        QListWidgetItem *item = m_historyList->item(i);
+        QWidget *row = m_historyList->itemWidget(item);
+        if (!item || !row)
+            continue;
+        int height = row->layout() ? row->layout()->heightForWidth(width) : -1;
+        if (height <= 0)
+            height = row->sizeHint().height();
+        const QSize wanted(width, height);
+        if (item->sizeHint() != wanted)
+            item->setSizeHint(wanted);
+    }
+}
+
+void ConfigPage::resizeEvent(QResizeEvent *event)
+{
+    PageBase::resizeEvent(event);
+    relayoutHistoryRows();
+}
+
+bool ConfigPage::eventFilter(QObject *watched, QEvent *event)
+{
+    if (m_historyList && watched == m_historyList->viewport() && event->type() == QEvent::Resize)
+        relayoutHistoryRows();
+    return PageBase::eventFilter(watched, event);
 }
 
 void ConfigPage::onActivated()

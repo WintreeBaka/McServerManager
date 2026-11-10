@@ -29,6 +29,10 @@ public:
     void onActivated() override;
     void onServerSelectionChanged(const QString &serverId) override;
 
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     QWidget *buildQuickPane();
     QWidget *buildExpertPane();
@@ -41,7 +45,11 @@ private:
     void saveQuick();
     void saveExpert();
     void validateExpert();
-    void loadHistory(const QString &serverId);
+    void loadHistory(const QString &serverId, bool userInitiated = false);
+    /// Re-measures the history rows for the width they actually get; the note label
+    /// wraps, so the height handed to the list has to be computed for that width or
+    /// the rollback button at the bottom of the row is clipped.
+    void relayoutHistoryRows();
     void rollbackTo(const QString &backupId);
     void setStatus(const QString &message, bool error = false);
     void setBusy(bool busy);

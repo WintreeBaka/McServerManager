@@ -664,7 +664,8 @@ QWidget *SettingsPage::buildAboutCard()
     layout->addWidget(makeSectionHeader(QStringLiteral("关于"),
                                         QStringLiteral("Qt 6 + C++ 桌面端，Docker 化的服务端运行环境"),
                                         nullptr, card));
-    m_aboutVersion = makeLabel(QStringLiteral("McServerManager 1.0.0"), QStringLiteral("caption"), card);
+    m_aboutVersion = makeLabel(QStringLiteral("McServerManager %1").arg(QApplication::applicationVersion()),
+                               QStringLiteral("caption"), card);
     m_aboutHome = makeLabel(QStringLiteral("数据目录：--"), QStringLiteral("hint"), card);
     m_aboutLog = makeLabel(QStringLiteral("后端日志：--"), QStringLiteral("hint"), card);
     layout->addWidget(m_aboutVersion);

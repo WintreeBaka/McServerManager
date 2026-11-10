@@ -1,5 +1,6 @@
 #include "ui/ToastHost.h"
 
+#include <QEvent>
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -24,6 +25,9 @@ ToastHost::ToastHost(QWidget *parent)
     m_layout->addStretch(1);
     setFixedWidth(320);
     hide();
+    // the strip is anchored to the parent's right edge, so it has to follow a resize
+    if (QWidget *owner = parentWidget())
+        owner->installEventFilter(this);
 }
 
 void ToastHost::reposition()
@@ -43,8 +47,32 @@ void ToastHost::resizeEvent(QResizeEvent *event)
     reposition();
 }
 
+bool ToastHost::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == parentWidget() && event->type() == QEvent::Resize) {
+        // Without this the strip kept the geometry from before the window was resized,
+        // so toasts were anchored past the right edge and got clipped.
+        reposition();
+        m_layout->invalidate();
+        m_layout->activate();
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void ToastHost::push(const QString &message, const QString &level, int timeoutMs)
 {
+    // One user action can reach this through more than one signal (a theme change is
+    // both logged and announced), which used to leave an extra card on screen. Collapse
+    // identical notices that arrive in the same burst.
+    const QDateTime now = QDateTime::currentDateTime();
+    if (message == m_lastMessage && level == m_lastLevel && m_lastPush.isValid()
+        && m_lastPush.msecsTo(now) < 700) {
+        return;
+    }
+    m_lastMessage = message;
+    m_lastLevel = level;
+    m_lastPush = now;
+
     const Palette &palette = ThemeManager::instance()->palette();
     QColor accent = palette.blue;
     QString glyph = QStringLiteral("ℹ");
@@ -74,6 +102,11 @@ void ToastHost::push(const QString &message, const QString &level, int timeoutMs
 
     auto *text = new QLabel(message, card);
     text->setWordWrap(true);
+    // A long CJK notice offers no spaces to break on, so QLabel reports a minimum width
+    // wider than this 320px strip and the card was laid out past the window edge with
+    // its right side cut off. Ignoring the hint lets the text wrap inside the card.
+    text->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    text->setMinimumWidth(0);
     text->setStyleSheet(QStringLiteral("color: %1;").arg(palette.text.name()));
 
     layout->addWidget(icon, 0, Qt::AlignTop);
@@ -95,8 +128,11 @@ void ToastHost::push(const QString &message, const QString &level, int timeoutMs
     raise();
     reposition();
 
-    const int travel = 34;
-    card->move(card->x() + travel, card->y() + 12);
+    // The layout owns the position. Animating `pos` here used to leave every card
+    // shifted 34px to the right (clipped at the window edge) and made two notices
+    // pushed together overlap, which looked like a third notification. Fade in place.
+    m_layout->invalidate();
+    m_layout->activate();
 
     auto *group = new QParallelAnimationGroup(card);
     auto *fade = new QPropertyAnimation(effect, "opacity", group);
@@ -104,12 +140,6 @@ void ToastHost::push(const QString &message, const QString &level, int timeoutMs
     fade->setEasingCurve(Easing::entrance());
     fade->setStartValue(0.0);
     fade->setEndValue(1.0);
-
-    auto *slide = new QPropertyAnimation(card, "pos", group);
-    slide->setDuration(Easing::normal());
-    slide->setEasingCurve(Easing::overshoot());
-    slide->setStartValue(card->pos() + QPoint(travel, 0));
-    slide->setEndValue(card->pos());
 
     group->start(QAbstractAnimation::DeleteWhenStopped);
 
@@ -121,16 +151,13 @@ void ToastHost::push(const QString &message, const QString &level, int timeoutMs
         fadeOut->setStartValue(effect->opacity());
         fadeOut->setEndValue(0.0);
 
-        auto *slideOut = new QPropertyAnimation(card, "pos", outGroup);
-        slideOut->setDuration(Easing::fast());
-        slideOut->setEasingCurve(Easing::standard());
-        slideOut->setStartValue(card->pos());
-        slideOut->setEndValue(card->pos() + QPoint(28, 0));
-
         QObject::connect(outGroup, &QParallelAnimationGroup::finished, this, [this, card]() {
             m_toasts.removeAll(card);
             m_layout->removeWidget(card);
             card->deleteLater();
+            // re-place the survivors so the stack stays aligned after a removal
+            m_layout->invalidate();
+            m_layout->activate();
             if (m_toasts.isEmpty())
                 hide();
         });

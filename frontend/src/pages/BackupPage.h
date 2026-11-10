@@ -19,12 +19,18 @@ public:
     void onActivated() override;
     void onServerSelectionChanged(const QString &serverId) override;
 
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     QWidget *buildScheduleCard();
     QWidget *buildCreateCard();
     QWidget *buildListCard();
 
     void loadBackups(const QString &serverId);
+    /// Re-measures every row for the width it actually gets (the meta label wraps).
+    void relayoutBackupRows();
     void applySchedule(const QJsonObject &schedule);
     void saveSchedule();
     void createBackup();

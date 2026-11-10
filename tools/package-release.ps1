@@ -7,7 +7,7 @@
     Usage:
         .\tools\package-release.ps1
         .\tools\package-release.ps1 -Flavor with-plugins      # 追加示例插件包，名字带后缀
-        .\tools\package-release.ps1 -Version 1.1.3 -DistDir dist
+        .\tools\package-release.ps1 -Version 1.1.4 -DistDir dist
 
     Three flavours exist and they deliberately get **different** folder names:
 
@@ -18,7 +18,7 @@
 param(
     [string]$BinDir = "build\bin",
     [string]$DistDir = "dist",
-    [string]$Version = "1.1.3",
+    [string]$Version = "1.1.4",
     [ValidateSet("plain", "with-plugins", "cli")]
     [string]$Flavor = "plain",
     [string]$QtBin = "D:\qt\6.11.2\mingw_64\bin",

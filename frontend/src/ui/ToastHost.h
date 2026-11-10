@@ -1,7 +1,9 @@
 #pragma once
 
+#include <QDateTime>
 #include <QWidget>
 
+class QEvent;
 class QVBoxLayout;
 
 namespace mcsm {
@@ -19,6 +21,7 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void reposition();
@@ -26,6 +29,11 @@ private:
     QVBoxLayout *m_layout = nullptr;
     QVector<QWidget *> m_toasts;
     int m_maxVisible = 4;
+
+    // last notice, used to collapse the same message arriving twice in one burst
+    QString m_lastMessage;
+    QString m_lastLevel;
+    QDateTime m_lastPush;
 };
 
 } // namespace mcsm

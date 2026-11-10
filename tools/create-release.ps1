@@ -1,4 +1,4 @@
-﻿<#
+<#
     创建 GitHub Release 并上传附件（不依赖 gh CLI，只用 REST API）。
 
     需要一个对目标仓库有写权限的令牌（classic PAT 勾选 repo，或 fine-grained 勾选
@@ -7,16 +7,16 @@
         $env:GITHUB_TOKEN = "ghp_xxx"
         .\tools\create-release.ps1
 
-    默认行为（1.1.3）：
-        tag     : v1.1.3
-        说明    : docs\RELEASE_NOTES-1.1.3.md
-        附件    : dist\McServerManager-1.1.3-win64.zip   （纯程序便携版）
+    默认行为（1.1.4）：
+        tag     : v1.1.4
+        说明    : docs\RELEASE_NOTES-1.1.4.md
+        附件    : dist\McServerManager-1.1.4-win64.zip   （纯程序便携版）
                   docs\PLUGIN-SDK.md                     （接口文档，单独附件）
 
     已存在同名 Release 时会复用并补传缺失的附件，不会重复创建。
 #>
 param(
-    [string]$Version = "1.1.3",
+    [string]$Version = "1.1.4",
     [string]$Repo = "WintreeBaka/McServerManager",
     [string]$Tag = "",
     [string]$Title = "",
