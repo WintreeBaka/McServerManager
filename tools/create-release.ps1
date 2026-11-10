@@ -10,8 +10,10 @@
     默认行为（1.1.4）：
         tag     : v1.1.4
         说明    : docs\RELEASE_NOTES-1.1.4.md
-        附件    : dist\McServerManager-1.1.4-win64.zip   （纯程序便携版）
-                  docs\PLUGIN-SDK.md                     （接口文档，单独附件）
+        附件    : dist\McServerManager-1.1.4-win64.zip         （GUI 便携版）
+                  dist\McServerManager-1.1.4-win64-cli.zip     （纯 CLI 精简版）
+                  docs\PLUGIN-SDK.md                           （接口文档）
+                  dist\plugins\com.mcsm.player-admin-1.0.0.zip （官方玩家管理插件）
 
     已存在同名 Release 时会复用并补传缺失的附件，不会重复创建。
 #>
@@ -33,7 +35,14 @@ if (-not $Tag) { $Tag = "v$Version" }
 if (-not $Title) { $Title = "McServerManager $Version · Windows 便携版" }
 if (-not $NotesFile) { $NotesFile = "docs\RELEASE_NOTES-$Version.md" }
 if ($Assets.Count -eq 0) {
-    $Assets = @("dist\McServerManager-$Version-win64.zip", "docs\PLUGIN-SDK.md")
+    # same four attachments as the Gitea script, so `.\tools\create-release.ps1` on its
+    # own never publishes a release that is missing the CLI build or the plugin zip
+    $Assets = @(
+        "dist\McServerManager-$Version-win64.zip",
+        "dist\McServerManager-$Version-win64-cli.zip",
+        "docs\PLUGIN-SDK.md",
+        "dist\plugins\com.mcsm.player-admin-1.0.0.zip"
+    )
 }
 
 if (-not $Token) {
