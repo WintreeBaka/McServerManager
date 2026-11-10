@@ -407,19 +407,20 @@ void BackupPage::relayoutBackupRows()
 {
     if (!m_list)
         return;
-    // Rows are measured for the width they actually get, because the meta label wraps.
-    // A hint taken before the row was reparented into the view left it too short and
-    // cut off the bottom of the action buttons.
-    const int width = qMax(160, m_list->viewport()->width() - 2);
+    // Same constraint as the config history list: the style sheet adds a padding to every
+    // item and the view places the row widget inside that padded rect, so the hint has to
+    // include it twice or the row is short by 2*padding and clips its buttons.
+    constexpr int kItemPadding = 6;
+    const int contentWidth = qMax(160, m_list->viewport()->width() - 2 * kItemPadding);
     for (int i = 0; i < m_list->count(); ++i) {
         QListWidgetItem *item = m_list->item(i);
         QWidget *row = m_list->itemWidget(item);
         if (!item || !row)
             continue;
-        int height = row->layout() ? row->layout()->heightForWidth(width) : -1;
+        int height = row->layout() ? row->layout()->heightForWidth(contentWidth) : -1;
         if (height <= 0)
             height = row->sizeHint().height();
-        const QSize wanted(width, height);
+        const QSize wanted(contentWidth + 2 * kItemPadding, height + 2 * kItemPadding + 2);
         if (item->sizeHint() != wanted)
             item->setSizeHint(wanted);
     }

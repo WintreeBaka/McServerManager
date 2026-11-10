@@ -40,10 +40,10 @@ TitleBar::TitleBar(QWidget *parent)
     identityLayout->setContentsMargins(0, 0, 0, 0);
     identityLayout->setSpacing(10);
 
-    auto *logo = new QLabel(QStringLiteral("⛏"), identity);
-    logo->setFixedSize(30, 30);
-    logo->setAlignment(Qt::AlignCenter);
-    logo->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    m_logo = new QLabel(QStringLiteral("⛏"), identity);
+    m_logo->setFixedSize(30, 30);
+    m_logo->setAlignment(Qt::AlignCenter);
+    m_logo->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
     auto *textColumn = new QWidget(identity);
     auto *textLayout = new QVBoxLayout(textColumn);
@@ -59,7 +59,7 @@ TitleBar::TitleBar(QWidget *parent)
     textLayout->addWidget(m_title);
     textLayout->addWidget(m_subtitle);
 
-    identityLayout->addWidget(logo);
+    identityLayout->addWidget(m_logo);
     identityLayout->addWidget(textColumn);
     layout->addWidget(identity);
     layout->addSpacing(8);
@@ -99,6 +99,13 @@ TitleBar::TitleBar(QWidget *parent)
             window->close();
     });
 
+    // the logo and the window buttons carry their own colours; applyTheme() paints
+    // them and is called again whenever the palette changes
+    applyTheme();
+}
+
+void TitleBar::applyTheme()
+{
     const Palette &palette = ThemeManager::instance()->palette();
     const QPair<QColor, QColor> logoColors = ThemeManager::accentColors(palette);
     const QString logoBackground =
@@ -106,9 +113,42 @@ TitleBar::TitleBar(QWidget *parent)
             ? logoColors.first.name()
             : QStringLiteral("qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:1 %2)")
                   .arg(logoColors.first.name(), logoColors.second.name());
-    logo->setStyleSheet(QStringLiteral("border-radius: 10px; font-size: 16px; color: #2A2333;"
-                                       "background: %1;")
-                            .arg(logoBackground));
+    m_logo->setStyleSheet(QStringLiteral("border-radius: 10px; font-size: 16px; color: #2A2333;"
+                                         "background: %1;")
+                              .arg(logoBackground));
+
+    const QString controlStyle =
+        QStringLiteral("QToolButton { border: none; border-radius: 9px; color: %1; font-size: 13px; }"
+                       "QToolButton:hover { background: %2; }"
+                       "QToolButton:pressed { background: %3; }")
+            .arg(palette.textMuted.name(), palette.surfaceHover.name(), palette.border.name());
+    for (QToolButton *button : m_controls)
+        button->setStyleSheet(controlStyle);
+
+    m_themeButton->setText(ThemeManager::instance()->isDark() ? QStringLiteral("☾")
+                                                             : QStringLiteral("☀"));
+    refreshChips();
+    update();
+}
+
+void TitleBar::refreshChips()
+{
+    const Palette &palette = ThemeManager::instance()->palette();
+    if (m_backendKnown) {
+        m_backendChip->setStyleSheet(
+            QStringLiteral("color: %1; background: %2; border-radius: 9px; padding: 2px 9px;"
+                           "font-size: 12px;")
+                .arg((m_backendAvailable ? palette.success : palette.danger).name(),
+                     palette.surfaceAlt.name()));
+    }
+    if (!m_dockerState.isEmpty()) {
+        const bool running = m_dockerState == QLatin1String("running");
+        m_dockerChip->setStyleSheet(
+            QStringLiteral("color: %1; background: %2; border-radius: 9px; padding: 2px 9px;"
+                           "font-size: 12px;")
+                .arg((running ? palette.success : palette.warning).name(),
+                     palette.surfaceAlt.name()));
+    }
 }
 
 QToolButton *TitleBar::makeControl(const QString &glyph, const QString &tooltip)
@@ -118,14 +158,7 @@ QToolButton *TitleBar::makeControl(const QString &glyph, const QString &tooltip)
     button->setToolTip(tooltip);
     button->setCursor(Qt::PointingHandCursor);
     button->setFixedSize(30, 30);
-    button->setStyleSheet(QStringLiteral(
-        "QToolButton { border: none; border-radius: 9px; color: %1; font-size: 13px; }"
-        "QToolButton:hover { background: %2; }"
-        "QToolButton:pressed { background: %3; }"));
-    const Palette &palette = ThemeManager::instance()->palette();
-    button->setStyleSheet(button->styleSheet().arg(palette.textMuted.name(),
-                                                  palette.surfaceHover.name(),
-                                                  palette.border.name()));
+    m_controls.append(button);
     return button;
 }
 
@@ -136,26 +169,23 @@ void TitleBar::setSubtitle(const QString &text)
 
 void TitleBar::setBackendState(bool available, const QString &detail)
 {
-    const Palette &palette = ThemeManager::instance()->palette();
+    m_backendAvailable = available;
+    m_backendKnown = true;
+    m_backendDetail = detail;
     m_backendChip->setText(available ? QStringLiteral("● 后端就绪") : QStringLiteral("● 后端缺失"));
     m_backendChip->setToolTip(detail);
-    m_backendChip->setStyleSheet(
-        QStringLiteral("color: %1; background: %2; border-radius: 9px; padding: 2px 9px; font-size: 12px;")
-            .arg((available ? palette.success : palette.danger).name(),
-                 palette.surfaceAlt.name()));
+    refreshChips();
 }
 
 void TitleBar::setDockerState(const QString &state, const QString &detail)
 {
-    const Palette &palette = ThemeManager::instance()->palette();
+    m_dockerState = state;
+    m_dockerDetail = detail;
     const bool running = state == QLatin1String("running");
     m_dockerChip->setText(running ? QStringLiteral("● Docker 运行中")
                                   : QStringLiteral("● Docker 未运行"));
     m_dockerChip->setToolTip(detail);
-    m_dockerChip->setStyleSheet(
-        QStringLiteral("color: %1; background: %2; border-radius: 9px; padding: 2px 9px; font-size: 12px;")
-            .arg((running ? palette.success : palette.warning).name(),
-                 palette.surfaceAlt.name()));
+    refreshChips();
 }
 
 void TitleBar::setThemeIsDark(bool dark)

@@ -61,7 +61,9 @@ MainWindow::MainWindow(QWidget *parent)
                                    docker.value(QStringLiteral("error")).toString());
     });
     connect(context, &AppContext::themeChanged, this, [this]() {
-        m_titleBar->setThemeIsDark(ThemeManager::instance()->isDark());
+        // the title bar bakes palette colours into inline stylesheets, so it has to be
+        // repainted explicitly; the role-based widgets are handled by the app style sheet
+        m_titleBar->applyTheme();
         invalidateBackground();
         update();
     });

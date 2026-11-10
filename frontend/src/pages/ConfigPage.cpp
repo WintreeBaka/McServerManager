@@ -659,20 +659,22 @@ void ConfigPage::relayoutHistoryRows()
 {
     if (!m_historyList)
         return;
-    // The row widgets live inside the list's viewport, so their height depends on the
-    // width that is actually available (the note label wraps). A hint measured before
-    // the widget was reparented left long rows too short, which clipped the bottom of
-    // the "回滚到此版本" button.
-    const int width = qMax(160, m_historyList->viewport()->width() - 2);
+    // The theme style sheet gives every list item a padding (6px right now) and the view
+    // places the row widget *inside* that padded rect, so the size hint has to carry the
+    // padding twice. Measured: a 300x76 hint produced a 288x64 widget, which cut the
+    // bottom off the "回滚到此版本" button.
+    constexpr int kItemPadding = 6;
+    const int contentWidth = qMax(160, m_historyList->viewport()->width() - 2 * kItemPadding);
     for (int i = 0; i < m_historyList->count(); ++i) {
         QListWidgetItem *item = m_historyList->item(i);
         QWidget *row = m_historyList->itemWidget(item);
         if (!item || !row)
             continue;
-        int height = row->layout() ? row->layout()->heightForWidth(width) : -1;
+        int height = row->layout() ? row->layout()->heightForWidth(contentWidth) : -1;
         if (height <= 0)
             height = row->sizeHint().height();
-        const QSize wanted(width, height);
+        // two extra pixels of slack so rounding never eats into the last widget
+        const QSize wanted(contentWidth + 2 * kItemPadding, height + 2 * kItemPadding + 2);
         if (item->sizeHint() != wanted)
             item->setSizeHint(wanted);
     }
