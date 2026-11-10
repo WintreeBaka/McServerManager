@@ -1,4 +1,4 @@
-<#
+﻿<#
     创建 GitHub Release 并上传附件（不依赖 gh CLI，只用 REST API）。
 
     需要一个对目标仓库有写权限的令牌（classic PAT 勾选 repo，或 fine-grained 勾选

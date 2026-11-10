@@ -1,4 +1,4 @@
-<#
+﻿<#
     创建 Gitea Release 并上传附件（与 create-release.ps1 对应）。
 
     需要一个 Gitea 访问令牌（设置 → 应用 → 生成令牌，至少 repository 读写）：
