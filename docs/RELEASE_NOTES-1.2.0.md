@@ -7,7 +7,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `McServerManager-1.2.0-win64.zip` | Windows 10/11 64 位**含 GUI 的便携版**（不需要安装 Qt 或 Java） |
-| `McServerManager-1.2.0-win64-cli.zip` | **纯 CLI 精简版**（约 6.5 MB，只有 mcsm-cli.exe 与 Qt Core/Network，适合脚本/服务器/无桌面环境） |
+| `McServerManager-1.2.0-win64-cli.zip` | **纯 CLI 精简版**（约 7.4 MB，只有 mcsm-cli.exe 与 Qt Core/Network，适合脚本/服务器/无桌面环境） |
 | `PLUGIN-SDK.md` | 插件接口文档（单独附件，也随包放在 `docs/`） |
 | `com.mcsm.player-admin-1.0.0.zip` | 官方插件「玩家管理」安装包 |
 
