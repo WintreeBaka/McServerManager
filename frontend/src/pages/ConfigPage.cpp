@@ -492,6 +492,9 @@ void ConfigPage::saveQuick()
                 QStringLiteral("已更新 %1 的配置（%2 项）").arg(m_serverId).arg(changed),
                 QStringLiteral("success"));
             loadServer(m_serverId, true);
+            // the list carries the '*' marker from the backend; refresh it so a save
+            // that just produced a backup clears the star without a manual refresh
+            AppContext::instance()->refreshServers();
         });
 }
 
@@ -522,6 +525,7 @@ void ConfigPage::saveExpert()
             AppContext::instance()->logActivity(
                 QStringLiteral("专家模式保存了 %1 的配置").arg(m_serverId), QStringLiteral("success"));
             loadServer(m_serverId, true);
+            AppContext::instance()->refreshServers();
         });
 }
 
@@ -639,6 +643,7 @@ void ConfigPage::rollbackTo(const QString &backupId)
             AppContext::instance()->logActivity(
                 QStringLiteral("配置已回滚（%1）").arg(backupId), QStringLiteral("success"));
             loadServer(m_serverId, true);
+            AppContext::instance()->refreshServers();
         });
 }
 
