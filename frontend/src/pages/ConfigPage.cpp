@@ -11,7 +11,6 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
-#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -356,18 +355,14 @@ void ConfigPage::loadServer(const QString &serverId, bool force)
 {
     if (serverId.isEmpty())
         return;
-    // Never overwrite unsaved edits silently. Re-entering the same server keeps
-    // the editor; switching servers asks before discarding.
+    // Never overwrite unsaved edits when the same server is reloaded (re-entering the
+    // page, pressing "还原"). Switching to another server just discards them: a modal
+    // prompt on every switch was intrusive, and the server list now marks such a
+    // server with '*' instead, so the state stays visible without interrupting.
     if (!force && serverId == m_serverId && isDirty())
         return;
-    if (!force && serverId != m_serverId && !m_serverId.isEmpty() && isDirty()) {
-        const auto answer = QMessageBox::question(
-            this, QStringLiteral("未保存的修改"),
-            QStringLiteral("当前服务器的配置还有未保存的修改，切换服务器会丢弃它们。继续吗？"),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        if (answer != QMessageBox::Yes)
-            return;
-    }
+    if (serverId != m_serverId)
+        AppContext::instance()->setConfigEditing(m_serverId, false);
     m_serverId = serverId;
     m_originalRaw.clear();
     setStatus(QStringLiteral("正在读取配置…"));
@@ -396,8 +391,17 @@ void ConfigPage::loadServer(const QString &serverId, bool force)
             setStatus(QStringLiteral("已载入 %1 项配置 · %2")
                           .arg(values.size())
                           .arg(QStringLiteral("与磁盘内容一致")));
+            AppContext::instance()->setConfigEditing(serverId, false);
         });
     loadHistory(serverId);
+}
+
+void ConfigPage::onDeactivated()
+{
+    // Leaving the page with unsaved edits keeps them in the editor but marks the
+    // server, so the list shows the '*' until they are saved or reverted.
+    if (!m_serverId.isEmpty())
+        AppContext::instance()->setConfigEditing(m_serverId, isDirty());
 }
 
 void ConfigPage::applyValues(const QMap<QString, QString> &values)
@@ -634,7 +638,7 @@ void ConfigPage::rollbackTo(const QString &backupId)
             setStatus(QStringLiteral("已回滚到 %1").arg(backupId));
             AppContext::instance()->logActivity(
                 QStringLiteral("配置已回滚（%1）").arg(backupId), QStringLiteral("success"));
-            loadServer(m_serverId);
+            loadServer(m_serverId, true);
         });
 }
 

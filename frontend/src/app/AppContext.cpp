@@ -304,6 +304,25 @@ void AppContext::setSelectedServerId(const QString &id)
     emit selectionChanged(id);
 }
 
+void AppContext::setConfigEditing(const QString &serverId, bool editing)
+{
+    if (serverId.isEmpty())
+        return;
+    const bool had = m_configEditing.contains(serverId);
+    if (had == editing)
+        return;
+    if (editing)
+        m_configEditing.insert(serverId);
+    else
+        m_configEditing.remove(serverId);
+    emit configEditingChanged();
+}
+
+bool AppContext::isConfigEditing(const QString &serverId) const
+{
+    return m_configEditing.contains(serverId);
+}
+
 void AppContext::refreshServers(std::function<void(bool, const QString &)> done)
 {
     const quint64 seq = ++m_serverListSeq;

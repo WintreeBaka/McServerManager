@@ -841,6 +841,7 @@ ServerSelector::ServerSelector(QWidget *parent)
     AppContext *context = AppContext::instance();
     connect(context->servers(), &ServerModel::changed, this, &ServerSelector::scheduleSync);
     connect(context, &AppContext::selectionChanged, this, [this](const QString &) { scheduleSync(); });
+    connect(context, &AppContext::configEditingChanged, this, &ServerSelector::scheduleSync);
     connect(this, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
         if (m_syncing)
             return;
@@ -887,21 +888,30 @@ void ServerSelector::sync()
     if (wanted.isEmpty())
         wanted = currentServerId();
 
+    // Rebuilding the combo is not a user choice. Emitting serverChanged for an
+    // unchanged selection made every server-list refresh (a start or stop, for
+    // example) look like a server switch to the pages.
+    const QString previous = currentData().toString();
+
     m_syncing = true;
     clear();
     if (servers.isEmpty()) {
         addItem(m_placeholder, QString());
     } else {
         for (const ServerInfo &info : servers) {
-            const QString label = QStringLiteral("%1 · %2 · %3")
-                                      .arg(info.name, info.statusText(), info.typeLabel());
+            const bool pending = info.configPending || context->isConfigEditing(info.id);
+            const QString label = QStringLiteral("%1%2 · %3 · %4")
+                                      .arg(info.name, pending ? QStringLiteral(" *") : QString(),
+                                           info.statusText(), info.typeLabel());
             addItem(label, info.id);
         }
         selectServer(wanted.isEmpty() ? servers.first().id : wanted);
     }
     m_syncing = false;
-    if (!currentData().toString().isEmpty())
-        emit serverChanged(currentData().toString());
+
+    const QString current = currentData().toString();
+    if (!current.isEmpty() && current != previous)
+        emit serverChanged(current);
 }
 
 } // namespace mcsm

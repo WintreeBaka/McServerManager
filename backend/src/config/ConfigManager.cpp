@@ -142,7 +142,12 @@ QMap<QString, QString> ConfigManager::readProperties(const QString &path)
 
 QMap<QString, QString> ConfigManager::readProperties(const ServerRecord &record)
 {
-    QMap<QString, QString> values = readProperties(record.propertiesPath());
+    return readPropertiesWithDefaults(record.propertiesPath());
+}
+
+QMap<QString, QString> ConfigManager::readPropertiesWithDefaults(const QString &path)
+{
+    QMap<QString, QString> values = readProperties(path);
     for (const ConfigField &field : ConfigSchema::fields()) {
         if (!values.contains(field.key))
             values.insert(field.key, field.defaultValue);

@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QProcess>
+#include <QSet>
 #include <QSettings>
 #include <QTimer>
 
@@ -39,6 +40,11 @@ public:
 
     QString selectedServerId() const { return m_selectedId; }
     void setSelectedServerId(const QString &id);
+
+    /// Marks whether the config page holds edits for `serverId` that were not saved
+    /// (and therefore are not in a backup). Shown as a '*' after the server name.
+    void setConfigEditing(const QString &serverId, bool editing);
+    bool isConfigEditing(const QString &serverId) const;
 
     bool animationsEnabled() const;
     void setAnimationsEnabled(bool enabled);
@@ -86,6 +92,8 @@ public:
 signals:
     void serversRefreshed(bool ok, const QString &message);
     void selectionChanged(const QString &serverId);
+    /// Emitted when a server starts or stops having unsaved config edits.
+    void configEditingChanged();
     void activityAdded(const QString &message, const QString &level);
     void notify(const QString &message, const QString &level);
     void themeChanged();
@@ -115,6 +123,7 @@ private:
     QElapsedTimer m_environmentTimer;
     QPointer<QProcess> m_daemon;
     QString m_selectedId;
+    QSet<QString> m_configEditing;
     QVector<QPair<QString, QString>> m_activity;
     QJsonObject m_environment;
     QString m_dataHomeCache;

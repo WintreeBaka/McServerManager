@@ -73,6 +73,7 @@ ServerInfo ServerInfo::fromJson(const QJsonObject &object)
     info.autoRestart = boolean(object, QStringLiteral("autoRestart"), true);
     info.autoStart = boolean(object, QStringLiteral("autoStart"), false);
     info.manualInstall = boolean(object, QStringLiteral("manualInstall"), false);
+    info.configPending = boolean(object, QStringLiteral("configPending"), false);
     info.createdAt = QDateTime::fromString(string(object, QStringLiteral("createdAt")), Qt::ISODate);
     info.lastStartAt = QDateTime::fromString(string(object, QStringLiteral("lastStartAt")), Qt::ISODate);
     info.lastBackupAt = QDateTime::fromString(string(object, QStringLiteral("lastBackupAt")), Qt::ISODate);

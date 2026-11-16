@@ -40,6 +40,10 @@ class ConfigManager
 public:
     static QMap<QString, QString> readProperties(const QString &path);
     static QMap<QString, QString> readProperties(const ServerRecord &record);
+    /// Reads a properties file and fills in the schema defaults for missing keys, so
+    /// two files can be compared the same way the app sees them (readProperties(record)
+    /// uses this; without it a file that omits schema keys never compares equal).
+    static QMap<QString, QString> readPropertiesWithDefaults(const QString &path);
     static QString readRaw(const QString &path);
     static QString readRaw(const ServerRecord &record);
 

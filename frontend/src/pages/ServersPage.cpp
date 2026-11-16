@@ -62,6 +62,8 @@ ServersPage::ServersPage(QWidget *parent)
     connect(AppContext::instance()->servers(), &ServerModel::changed, this, &ServersPage::onServersChanged);
     connect(AppContext::instance(), &AppContext::selectionChanged, this,
             &ServersPage::onServerSelectionChanged);
+    connect(AppContext::instance(), &AppContext::configEditingChanged, this,
+            &ServersPage::onServersChanged);
     rebuildList();
 }
 
@@ -290,7 +292,11 @@ void ServersPage::rebuildList()
         topRow->setSpacing(8);
         auto *dot = new StatusDot(widget);
         dot->setState(info.status);
-        auto *name = makeLabel(info.name, QStringLiteral("subtitle"), widget);
+        const bool pending = info.configPending || AppContext::instance()->isConfigEditing(info.id);
+        auto *name = makeLabel(pending ? info.name + QStringLiteral(" *") : info.name,
+                               QStringLiteral("subtitle"), widget);
+        if (pending)
+            name->setToolTip(QStringLiteral("配置与最近的备份不一致，或还没有备份"));
         topRow->addWidget(dot, 0, Qt::AlignVCenter);
         topRow->addWidget(name, 1);
         layout->addLayout(topRow);
@@ -424,7 +430,9 @@ void ServersPage::applyDetail(const ServerInfo &info)
     const Palette &palette = ThemeManager::instance()->palette();
     m_current = info;
     m_statusDot->setState(info.status);
-    m_nameLabel->setText(info.name.isEmpty() ? info.id : info.name);
+    const bool pending = info.configPending || AppContext::instance()->isConfigEditing(info.id);
+    const QString shown = info.name.isEmpty() ? info.id : info.name;
+    m_nameLabel->setText(pending ? shown + QStringLiteral(" *") : shown);
     m_summaryLabel->setText(info.summary());
     m_typeChip->setText(info.typeLabel());
     m_versionChip->setText(info.mcVersion.isEmpty() ? QStringLiteral("自定义版本") : info.mcVersion);

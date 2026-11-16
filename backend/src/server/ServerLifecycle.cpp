@@ -232,6 +232,33 @@ QString ServerLifecycle::runtimeState(const ServerRecord &record)
     return QStringLiteral("stopped");
 }
 
+namespace {
+
+/// True when server.properties differs from the state the newest config backup
+/// describes, or when the server has no backup at all. The desktop app shows a '*'
+/// next to such a server so the user can see its configuration is not captured.
+bool configPendingBackup(const ServerRecord &record)
+{
+    const QMap<QString, QString> current = ConfigManager::readProperties(record);
+    if (current.isEmpty())
+        return false;   // nothing written yet, so there is nothing to be out of sync
+    const QVector<ConfigBackup> backups = ConfigManager::listBackups(record);
+    if (backups.isEmpty())
+        return true;    // never snapshotted
+    const ConfigBackup &newest = backups.last();
+    if (newest.file.isEmpty() || !QFileInfo::exists(newest.file))
+        return true;
+    // A snapshot stores the file *before* the change plus the diff that was applied,
+    // so the state that save produced is "snapshot content + its changes". Comparing
+    // the live file against that tells us whether anyone touched it afterwards.
+    QMap<QString, QString> expected = ConfigManager::readPropertiesWithDefaults(newest.file);
+    for (const ConfigDiffEntry &change : newest.changes)
+        expected.insert(change.key, change.after);
+    return expected != current;
+}
+
+} // namespace
+
 QJsonObject ServerLifecycle::status(const ServerRecord &record, bool withStats)
 {
     QJsonObject object = record.toJson();
@@ -239,6 +266,7 @@ QJsonObject ServerLifecycle::status(const ServerRecord &record, bool withStats)
     object.insert(QStringLiteral("status"), state);
     object.insert(QStringLiteral("containerState"), DockerManager::containerState(record.id));
     object.insert(QStringLiteral("containerName"), record.containerName());
+    object.insert(QStringLiteral("configPending"), configPendingBackup(record));
     if (withStats && state == QLatin1String("running"))
         object.insert(QStringLiteral("stats"), DockerManager::stats(record.id));
     return object;

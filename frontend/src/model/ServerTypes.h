@@ -33,6 +33,9 @@ struct ServerInfo
     bool autoRestart = true;
     bool autoStart = false;
     bool manualInstall = false;
+    /// server.properties differs from the newest config backup (or no backup exists);
+    /// the server name gets a '*' so the user can see it is not captured by a backup.
+    bool configPending = false;
     QDateTime createdAt;
     QDateTime lastStartAt;
     QDateTime lastBackupAt;

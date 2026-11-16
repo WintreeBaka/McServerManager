@@ -3,6 +3,7 @@
 #include <QCloseEvent>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPainter>
 #include <QShortcut>
 #include <QVBoxLayout>
@@ -412,6 +413,26 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    // Servers run in their own containers, so closing the manager leaves them up.
+    // Say so before the window disappears, otherwise it looks like an accidental
+    // shutdown of the game servers.
+    QStringList running;
+    for (const ServerInfo &info : AppContext::instance()->servers()->servers()) {
+        if (info.isRunning())
+            running << (info.name.isEmpty() ? info.id : info.name);
+    }
+    if (!running.isEmpty()) {
+        const auto answer = QMessageBox::question(
+            this, QStringLiteral("退出管理器"),
+            QStringLiteral("以下服务器仍在运行：\n\n%1\n\n"
+                           "退出管理器不会关闭它们，服务器会继续在容器中运行。确定退出吗？")
+                .arg(running.join(QStringLiteral("、"))),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            event->ignore();
+            return;
+        }
+    }
     AppContext::instance()->stopScheduler();
     QMainWindow::closeEvent(event);
 }

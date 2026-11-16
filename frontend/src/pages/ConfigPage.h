@@ -27,6 +27,7 @@ public:
     explicit ConfigPage(QWidget *parent = nullptr);
 
     void onActivated() override;
+    void onDeactivated() override;
     void onServerSelectionChanged(const QString &serverId) override;
 
 protected:
