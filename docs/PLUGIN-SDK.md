@@ -1,6 +1,6 @@
 # McServerManager 插件接口说明（Plugin SDK）
 
-版本：**apiVersion 1** · 适用于 McServerManager 1.1.3 及以上
+版本：**apiVersion 1** · 适用于 McServerManager 1.2.0 及以上
 
 本文档描述 McServerManager 的**插件包（plugin package）**机制：如何打包、导入、启用，以及
 前端（桌面界面）、后端（CLI 能力）、支持库 / Web 面板三类扩展分别可以调用哪些接口。
@@ -204,7 +204,7 @@ my-plugin-1.0.0.zip
   "apiVersion": 1,
   "supportedMinApi": 1,
   "supportedMaxApi": 1,
-  "managerVersion": "1.1.3",
+  "managerVersion": "1.2.0",
   "apiVersionPolicy": {
     "type": "integer",
     "bumpOn": "每增加一批新接口 +1",
@@ -238,7 +238,7 @@ my-plugin-1.0.0.zip
 
 | 属性 | 说明 |
 | --- | --- |
-| `mcsm.version` | 管理器版本，如 `1.1.3` |
+| `mcsm.version` | 管理器版本，如 `1.2.0` |
 | `mcsm.apiVersion` | 当前接口级别（整数，如 `1`） |
 | `mcsm.plugin.id / .name / .version / .scope / .path` | 当前插件信息 |
 
@@ -657,6 +657,10 @@ Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(resu
 * `apiVersion` 是整数区间校验（见 §4.3）：只增加新接口时抬 `SUPPORTED_MAX_API`；
   破坏性变更时抬 `SUPPORTED_MIN_API`，旧插件被明确拒绝而不是行为异常。
 * 管理器新增能力时只增加字段、不删除旧字段；插件应当忽略不认识的键。
+* 本版（1.2.0）新增的交互能力：`table` 的 `selectable`/`key`/`rowIds`/`selected`、
+  `buttons` 的 `action` 与 `pick`、`mcsm.ui.onAction()`、`ui.selection` 事件（见 §5.3.1）。
+  用到它们的插件请在 `plugin.json` 里把 `minManagerVersion` 设成 `1.2.0` 或更高，
+  这样在旧管理器上会给出明确提示而不是「页面空白」。
 * 查询当前接口定义（机器可读，适合生成文档或做自动检查）：
 
 ```powershell
@@ -668,7 +672,7 @@ mcsm-cli plugin api --pretty
   "apiVersion": 1,
   "supportedMinApi": 1,
   "supportedMaxApi": 1,
-  "managerVersion": "1.1.3",
+  "managerVersion": "1.2.0",
   "apiVersionPolicy": {
     "type": "integer",
     "bumpOn": "每增加一批新接口 +1",
@@ -696,7 +700,29 @@ mcsm-cli plugin api --pretty
     "globalObject": "mcsm",
     "namespaces": ["mcsm.plugin", "mcsm.ui", "mcsm.storage", "mcsm.settings", "mcsm.servers",
                    "mcsm.backend", "mcsm.events", "mcsm.utils"],
-    "pageBlocks": ["heading", "text", "keyvalue", "table", "buttons", "log", "html", "divider", "progress"]
+    "pageBlocks": ["heading", "text", "keyvalue", "table", "buttons", "log", "html", "divider", "progress"],
+    "events": ["app.ready", "theme.changed", "server.selected", "servers.refreshed", "ui.selection"],
+    "interactive": {
+      "table.selectable": {
+        "fields": ["selectable", "key", "rowIds", "selected"],
+        "description": "表格行前带勾选框，自带全选/全不选与已选计数",
+        "event": "ui.selection",
+        "eventPayload": ["pageId", "key", "selected", "count"]
+      },
+      "buttons.action": {
+        "field": "action",
+        "binding": "mcsm.ui.onAction(pageId, actionId, handler)",
+        "callbackPayload": ["pageId", "action", "path"],
+        "description": "点击按钮时调用脚本回调，而不是执行 mcsm-cli 命令"
+      },
+      "buttons.pick": {
+        "field": "pick",
+        "modes": ["save", "open", "dir", "auto"],
+        "fields": ["mode", "title", "filter", "defaultPath", "defaultName"],
+        "description": "由管理器弹原生文件对话框，选中的路径经回调的 path 字段返回；auto = 只勾选 1 行时另存为，否则选目录"
+      },
+      "note": "事件回调有约 1 秒预算（前端看门狗），不要在脚本里同步等待输入"
+    }
   },
   "backend": {
     "protocol": "JSON lines over stdin/stdout",

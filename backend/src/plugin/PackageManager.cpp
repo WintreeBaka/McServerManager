@@ -973,6 +973,49 @@ QJsonObject PackageManager::apiManifest()
         QStringLiteral("table"), QStringLiteral("buttons"), QStringLiteral("log"),
         QStringLiteral("html"), QStringLiteral("divider"), QStringLiteral("progress"),
     }));
+    frontendApi.insert(QStringLiteral("events"), strArray({
+        QStringLiteral("app.ready"), QStringLiteral("theme.changed"),
+        QStringLiteral("server.selected"), QStringLiteral("servers.refreshed"),
+        QStringLiteral("ui.selection"),
+    }));
+    frontendApi.insert(QStringLiteral("interactive"), QJsonObject {
+        {QStringLiteral("table.selectable"), QJsonObject {
+            {QStringLiteral("fields"), strArray({
+                QStringLiteral("selectable"), QStringLiteral("key"),
+                QStringLiteral("rowIds"), QStringLiteral("selected"),
+            })},
+            {QStringLiteral("description"), QStringLiteral("表格行前带勾选框，自带全选/全不选与已选计数")},
+            {QStringLiteral("event"), QStringLiteral("ui.selection")},
+            {QStringLiteral("eventPayload"), strArray({
+                QStringLiteral("pageId"), QStringLiteral("key"),
+                QStringLiteral("selected"), QStringLiteral("count"),
+            })},
+        }},
+        {QStringLiteral("buttons.action"), QJsonObject {
+            {QStringLiteral("field"), QStringLiteral("action")},
+            {QStringLiteral("binding"), QStringLiteral("mcsm.ui.onAction(pageId, actionId, handler)")},
+            {QStringLiteral("callbackPayload"), strArray({
+                QStringLiteral("pageId"), QStringLiteral("action"), QStringLiteral("path"),
+            })},
+            {QStringLiteral("description"), QStringLiteral("点击按钮时调用脚本回调，而不是执行 mcsm-cli 命令")},
+        }},
+        {QStringLiteral("buttons.pick"), QJsonObject {
+            {QStringLiteral("field"), QStringLiteral("pick")},
+            {QStringLiteral("modes"), strArray({
+                QStringLiteral("save"), QStringLiteral("open"),
+                QStringLiteral("dir"), QStringLiteral("auto"),
+            })},
+            {QStringLiteral("fields"), strArray({
+                QStringLiteral("mode"), QStringLiteral("title"), QStringLiteral("filter"),
+                QStringLiteral("defaultPath"), QStringLiteral("defaultName"),
+            })},
+            {QStringLiteral("description"),
+             QStringLiteral("由管理器弹原生文件对话框，选中的路径经回调的 path 字段返回；"
+                            "auto = 只勾选 1 行时另存为，否则选目录")},
+        }},
+        {QStringLiteral("note"),
+         QStringLiteral("事件回调有约 1 秒预算（前端看门狗），不要在脚本里同步等待输入")},
+    });
 
     QJsonObject backendApi;
     backendApi.insert(QStringLiteral("protocol"), QStringLiteral("JSON lines over stdin/stdout"));
