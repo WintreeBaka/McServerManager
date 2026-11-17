@@ -445,6 +445,17 @@ mcsm.include("frontend/util.js");   // 在同一个引擎里求值，可共享�
 
 缺少运行时不会被静默忽略：`plugin package info` 会显示 `launchError`，界面也会提示。
 
+**后端进程的环境变量**：JSON-Line 后端目前**不注入**任何 `MCSM_PLUGIN_*` 环境变量（只有 `web.port` 的
+服务进程会注入，见 7.2）。需要插件 id / 安装目录 / 版本号时，请用请求 JSON 里的 `pluginsDir`、`dataDir`
+推断数据根，再读 `<插件安装目录>/plugin.json`；脚本位于 `<插件目录>/backend/`，因此
+`path.resolve(__dirname, "..") + "/plugin.json"` 也能直接拿到清单。**不要写死版本号** ——
+升级插件后后端会继续回报旧版本，导出包里记录的作者信息也会是错的。
+
+> **计划中的改进**：后续管理器版本会给后端与服务的插件进程统一注入
+> `MCSM_PLUGIN_ID` / `MCSM_PLUGIN_DIR` / `MCSM_PLUGIN_DATA` / `MCSM_PLUGIN_VERSION`
+> （`VERSION` 取 `plugin.json` 的 `version`），届时插件不必再自己读清单。
+> 在那之前请写成 `process.env.MCSM_PLUGIN_VERSION || readOwnManifest().version`，两种管理器都能跑。
+
 ### 6.2 请求与响应格式
 
 **请求**（管理器 -> 插件，一行 JSON）：

@@ -13,7 +13,11 @@
   一次导出多台），导入改为「选择容器包导入…」，原来的逐条导入按钮已移除。
 * 容器搬运工 **0.2.1**：修复插件页表格勾选框右侧被裁、以及勾选框与卡片左缘距离过大的问题 ——
   勾选框列改用固定列宽，文本内边距改由 delegate 绘制（QSS 的 `item` padding 会连 cell widget 一起内缩）。
-* 容器搬运工 **0.2.2**（当前版本）：
+* 容器搬运工 **1.0.0**（正式版，当前版本）：
+  正式发布：完整版 `com.mcsm.container-porter`（全局）与 CLI 版 `com.mcsm.container-porter.cli`
+  （只有后端）同时进入 1.0.0，后端代码同源、容器包可互相导入；
+  两版分别发布为 `com.mcsm.container-porter-1.0.0.zip` / `com.mcsm.container-porter.cli-1.0.0.zip`。
+* 容器搬运工 **0.2.2**：
   * 新增 **CLI 版** `com.mcsm.container-porter.cli`（作用域 `backend`，只有后端、没有页面），
     给只安装 `mcsm-cli` 的机器用；两版后端代码相同，导出的容器包可以互相导入。
   * 后端 `info` 改为从安装目录的 `plugin.json` 读版本号，不再硬编码 `1.0.0`

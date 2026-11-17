@@ -18,7 +18,7 @@
 
 ```powershell
 # 只装了命令行版的机器（发行包 McServerManager-<版本>-win64-cli.zip 里只有 mcsm-cli.exe）
-mcsm-cli plugin package install --zip dist\plugins\com.mcsm.container-porter.cli-0.2.2.zip
+mcsm-cli plugin package install --zip dist\plugins\com.mcsm.container-porter.cli-1.0.0.zip
 mcsm-cli plugin package info --name com.mcsm.container-porter.cli
 ```
 

@@ -30,3 +30,5 @@ debug.log
 # python
 __pycache__/
 *.pyc
+# 本地说明文档（含未来本体的待办，不随插件提交）
+修复说明-*.md

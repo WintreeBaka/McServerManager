@@ -40,7 +40,8 @@ function readOwnManifest() {
 const MANIFEST = readOwnManifest();
 const PLUGIN_ID = process.env.MCSM_PLUGIN_ID || MANIFEST.id || "com.mcsm.container-porter";
 const BUNDLE_FORMAT = "mcsm-container-porter/1";
-const PLUGIN_VERSION = MANIFEST.version || "0.0.0";
+// 管理器以后会注入 MCSM_PLUGIN_VERSION；在那之前从 plugin.json 读。
+const PLUGIN_VERSION = process.env.MCSM_PLUGIN_VERSION || MANIFEST.version || "0.0.0";
 const TAR = process.platform === "win32" ? "tar.exe" : "tar";
 const DOCKER_TIMEOUT = 30 * 60 * 1000;
 

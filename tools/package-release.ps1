@@ -107,30 +107,50 @@ if ($Flavor -eq "with-plugins") {
     Write-Host ("bundled {0} example plugin package(s)" -f $packages) -ForegroundColor Cyan
 }
 
-# "with-container-porter" flavour: ship the official 容器搬运工 plugin package so a
-# fresh copy can move a server container right away (设置 → 插件扩展 → 添加插件).
+# "with-container-porter" flavour: ship both official 容器搬运工 plugin packages —— the
+# full edition (UI page) and the CLI-only edition (backend scope). A fresh copy can move a
+# server container right away via 设置 → 插件扩展 → 添加插件, or via mcsm-cli.
 if ($Flavor -eq "with-container-porter") {
-    $pluginId = "com.mcsm.container-porter"
-    $manifest = "plugins\official\container-porter\plugin.json"
-    $pluginZip = $null
-    if (Test-Path $manifest) {
-        $version = (Get-Content $manifest -Raw -Encoding UTF8 | ConvertFrom-Json).version
-        $pluginZip = Get-Item (Join-Path $DistDir "plugins\$pluginId-$version.zip") -ErrorAction SilentlyContinue
-    }
-    if (-not $pluginZip) {
-        $pluginZip = Get-ChildItem (Join-Path $DistDir "plugins") -Filter "$pluginId-*.zip" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    }
-    if (-not $pluginZip) {
-        throw "missing $DistDir\plugins\com.mcsm.container-porter-*.zip - run plugins\build-plugins.ps1 first"
-    }
     $target = Join-Path $stage "plugin-packages"
     New-Item -ItemType Directory -Force -Path $target | Out-Null
-    Copy-Item $pluginZip.FullName -Destination $target -Force
-    $note = "在管理器里打开 设置 → 插件扩展 → 添加插件，选择本目录的 {0}；`r`n也可以用命令行安装：mcsm-cli plugin package install --zip `"{0}`"。" -f $pluginZip.Name
+    $variants = @(
+        @{ Id = "com.mcsm.container-porter";     Dir = "plugins\official\container-porter" },
+        @{ Id = "com.mcsm.container-porter.cli"; Dir = "plugins\official\container-porter-cli" }
+    )
+    $bundled = @()
+    foreach ($variant in $variants) {
+        $manifest = Join-Path $variant.Dir "plugin.json"
+        $zip = $null
+        if (Test-Path $manifest) {
+            $version = (Get-Content $manifest -Raw -Encoding UTF8 | ConvertFrom-Json).version
+            $zip = Get-Item (Join-Path $DistDir ("plugins\{0}-{1}.zip" -f $variant.Id, $version)) -ErrorAction SilentlyContinue
+        }
+        if (-not $zip) {
+            $zip = Get-ChildItem (Join-Path $DistDir "plugins") -Filter ("{0}-*.zip" -f $variant.Id) -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        }
+        if (-not $zip) {
+            throw ("missing {0}\plugins\{1}-*.zip - run plugins\build-plugins.ps1 first" -f $DistDir, $variant.Id)
+        }
+        Copy-Item $zip.FullName -Destination $target -Force
+        Copy-Item (Join-Path $variant.Dir "README.md") -Destination ($target + "\" + $variant.Id + "-README.md") -Force -ErrorAction SilentlyContinue
+        $bundled += $zip.Name
+    }
+    $note = @"
+容器搬运工——两个版本，只需装一个：
+
+* $($bundled[0])  完整版（全局作用域）：桌面管理器用，左侧导航会多出「导入与导出」页面。
+* $($bundled[1])  CLI 版（只有后端）：只装了 mcsm-cli 的机器、服务器主机、脚本 / CI 用，没有界面。
+
+两版后端是同一份代码，导出的 .tar 容器包可以互相导入。
+
+安装：
+  管理器里：设置 → 插件扩展 → 添加插件，选择上面的 zip。
+  命令行：  mcsm-cli plugin package install --zip "$($bundled[0])"
+            mcsm-cli plugin package install --zip "$($bundled[1])"
+"@
     Set-Content -Path (Join-Path $target "安装说明.txt") -Value $note -Encoding UTF8
-    Copy-Item "plugins\official\container-porter\README.md" -Destination $target -Force -ErrorAction SilentlyContinue
-    Write-Host ("bundled {0}" -f $pluginZip.Name) -ForegroundColor Cyan
+    Write-Host ("bundled {0}" -f ($bundled -join " + ")) -ForegroundColor Cyan
 }
 
 $total = (Get-ChildItem $stage -Recurse -File | Measure-Object -Property Length -Sum).Sum
