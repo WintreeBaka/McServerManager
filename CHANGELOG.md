@@ -1,5 +1,14 @@
 # 更新日志
 
+## 未发布
+
+### 插件
+
+* 新增官方插件 **容器搬运工**（`plugins/official/container-porter`）：左侧导航多出「导入与导出」页面，
+  可以把选中的服务器连同容器镜像导出成单个 `.tar` 容器包（三种粒度：数据 + 配置 / 含镜像 / 含备份与日志），
+  也可以在另一台管理器里导入该包 —— 导入会自动分配新的 id 与端口、必要时改写 `server.properties`，
+  并把服务器**直接加入服务器列表**。详见 [plugins/official/container-porter/README.md](plugins/official/container-porter/README.md)。
+
 ## 1.2.0
 
 ### 新功能
