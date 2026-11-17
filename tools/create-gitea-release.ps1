@@ -6,7 +6,7 @@
         $env:GITEA_TOKEN = "xxxxxxxx"
         .\tools\create-gitea-release.ps1
 
-    默认发布 v0.2.0 到 http://192.168.1.82:3000/w/McServerManager，
+    默认发布 v1.2.0 到 http://192.168.1.82:3000/w/McServerManager，
     附件：GUI 便携版、纯 CLI 精简版、PLUGIN-SDK.md、官方玩家管理插件。
     已存在同名 Release 时会复用并补传缺失附件。
 #>
