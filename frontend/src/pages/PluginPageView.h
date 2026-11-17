@@ -1,7 +1,9 @@
 #pragma once
 
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QStringList>
 
 #include "plugin/PluginHost.h"
 #include "widgets/Common.h"
@@ -41,6 +43,8 @@ private:
     QVBoxLayout *m_layout = nullptr;
     LogView *m_log = nullptr;
     QVector<QString> m_pendingLog;
+    /// Ticked rows of selectable tables, keyed by the block's `key`.
+    QHash<QString, QStringList> m_selection;
 };
 
 } // namespace mcsm

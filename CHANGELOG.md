@@ -8,6 +8,17 @@
   可以把选中的服务器连同容器镜像导出成单个 `.tar` 容器包（三种粒度：数据 + 配置 / 含镜像 / 含备份与日志），
   也可以在另一台管理器里导入该包 —— 导入会自动分配新的 id 与端口、必要时改写 `server.properties`，
   并把服务器**直接加入服务器列表**。详见 [plugins/official/container-porter/README.md](plugins/official/container-porter/README.md)。
+* 容器搬运工 0.2.0：服务器表格支持勾选（含「全选 / 全不选」，「当前选中服务器」显示已选项与数量，
+  超过三台显示成「A、B、C 等 N 台」），**导出前先让用户选择保存位置**（单选另存为、多选选目录，
+  一次导出多台），导入改为「选择容器包导入…」，原来的逐条导入按钮已移除。
+
+### 插件 SDK
+
+* `table` 区块新增 `selectable: true` / `key` / `rowIds` / `selected`：可勾选表格，自带全选与计数，
+  勾选变化通过 `ui.selection` 事件通知插件 `{pageId, key, selected, count}`。
+* `buttons` 新增 `action`（点击直接回调脚本，见 `mcsm.ui.onAction`）与 `pick`
+  （`save` / `open` / `dir` / `auto`，先弹原生文件对话框再把路径交给回调）。
+* 修复插件页表格表头与内容不对齐（表头改为左对齐并统一内边距）。
 
 ## 1.2.0
 

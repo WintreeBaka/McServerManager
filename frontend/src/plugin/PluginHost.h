@@ -46,6 +46,13 @@ public:
     Q_INVOKABLE QString registerPage(const QJSValue &descriptor);
     Q_INVOKABLE void setPageContent(const QString &pageId, const QJSValue &blocks) const;
     Q_INVOKABLE void openPage(const QString &pageId) const;
+    /// Binds a JS handler to a button that declares `action: "<id>"`. Buttons
+    /// with an action call into the script instead of spawning a backend command,
+    /// which is what interactive pages (pick a file, then export) need.
+    Q_INVOKABLE void onAction(const QString &pageId, const QString &actionId,
+                              const QJSValue &handler);
+    /// Runs the handler bound to `actionId` (called by the page view).
+    bool runAction(const QString &pageId, const QString &actionId, const QJsonObject &payload);
 
     Q_INVOKABLE QJSValue storageGet(const QString &key) const;
     Q_INVOKABLE void storageSet(const QString &key, const QJSValue &value) const;
@@ -80,6 +87,8 @@ private:
     QJSEngine *m_engine = nullptr;
     QJsonObject m_plugin;
     QHash<QString, QVector<QJSValue>> m_handlers;
+    /// pageId + '/' + actionId -> handlers bound through mcsm.ui.onAction.
+    QHash<QString, QVector<QJSValue>> m_actions;
 };
 
 /// Loads plugin frontend scripts, exposes the API and keeps the contributed
@@ -116,6 +125,11 @@ public:
     QString pagePluginId(const QString &pageId) const;
 
     void dispatchEvent(const QString &event, const QJsonObject &payload = QJsonObject());
+    /// Runs the script handler bound to a page button action. Returns false when
+    /// no plugin owns the page or nothing was bound for that action. `payload`
+    /// carries whatever the page picked for the action (a chosen path, ...).
+    bool invokeAction(const QString &pageId, const QString &actionId,
+                      const QJsonObject &payload = QJsonObject());
 
     // --- called by PluginApi -------------------------------------------------
     void registerPage(const QJsonObject &descriptor, const QString &pluginId,

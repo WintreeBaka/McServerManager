@@ -275,20 +275,76 @@ mcsm.ui.openPage(pageId);   // 让管理器跳转到该页面
 | `heading` | `text` | 标题 |
 | `text` | `text`, `style`(`hint` / `caption` / `subtitle`) | 段落文本 |
 | `keyvalue` | `items: [["键","值"], ...]` 或 `[{key,value}]` | 键值表 |
-| `table` | `title`, `columns: []`, `rows: [[...]]` | 表格 |
-| `buttons` | `items: [{label, icon, command, url, openUrlFrom, toast, level}]`，`level` 取 `primary`（默认）/ `outline`（可写 `ghost`）/ `soft` / `danger` | 按钮行 |
+| `table` | `title`, `columns: []`, `rows: [[...]]`；可选 `selectable: true`, `key`, `rowIds: []`, `selected: []` | 表格；`selectable` 时每行前带勾选框，并有「全选 / 全不选」 |
+| `buttons` | `items: [{label, icon, command, action, pick, url, openUrlFrom, toast, level}]`，`level` 取 `primary`（默认）/ `outline`（可写 `ghost`）/ `soft` / `danger` | 按钮行 |
 | `log` | `title`, `text` | 控制台风格输出框（按钮执行结果也会写进这里） |
 | `html` | `html` | 富文本片段（Qt 富文本子集） |
 | `divider` | 无 | 分隔线 |
 | `progress` | `label`, `value`(0-100) | 进度条 |
 
-`buttons` 的三种行为：
+`buttons` 的四种行为：
 
 1. `command`：执行一条 mcsm-cli 命令（例如 `"server list"`、`"plugin call --name x --method y"`），
    结果写入同页面的 `log` 区块；
 2. `url`：直接用浏览器打开；
 3. `openUrlFrom: "url"`：先执行 `command`，再从返回数据里取该字段作为 URL 打开
    （例如 `plugin service start` 返回的 `url`）。
+4. `action: "名字"`：不执行命令，改为调用脚本里通过 `mcsm.ui.onAction` 绑定的回调
+   （见 5.3.1），配合 `pick` 可以让用户先选文件/目录。
+
+#### 5.3.1 交互式页面：勾选表格、按钮回调、选择路径
+
+需要用户选择的页面（导出时要选保存位置、导入时要选文件）用这三个能力组合：
+
+```js
+var pageId = mcsm.ui.registerPage({ id: "my-page", title: "我的页面" });
+
+// ① 按钮回调：点击时不跑命令，直接调脚本
+mcsm.ui.onAction(pageId, "export", function (info) {
+  // info = { pageId, action, path? }   ← path 是 pick 选出来的路径
+  if (!info.path) return;                       // 用户取消了
+  mcsm.backend.invoke(["plugin", "call", "--name", mcsm.plugin.id,
+                       "--method", "export~" + encodeURIComponent(info.path)],
+                      function (reply) { mcsm.log(JSON.stringify(reply.data)); });
+});
+
+// ② 按钮声明 action + pick：管理器先弹原生对话框，再回调
+mcsm.ui.setPageContent(pageId, [{
+  type: "buttons",
+  items: [
+    { label: "导出…", action: "export",
+      pick: { mode: "auto", title: "导出到…", filter: "容器包 (*.tar)",
+              defaultPath: "", defaultName: "备份.tar" } },
+    { label: "导入…", action: "import",
+      pick: { mode: "open", title: "选择容器包", filter: "容器包 (*.tar)" } }
+  ]
+}]);
+
+// ③ 可勾选表格：勾选变化会触发 ui.selection 事件
+mcsm.ui.setPageContent(pageId, [{
+  type: "table", title: "服务器", columns: ["名称", "类型"],
+  rows: [["主服", "paper"], ["测试服", "vanilla"]],
+  selectable: true, key: "servers",
+  rowIds: ["main", "test"],    // 与 rows 一一对应，作为选择结果里的 id
+  selected: ["main"]           // 初始勾选（重绘时用它保持状态）
+}]);
+mcsm.events.on("ui.selection", function (payload) {
+  // payload = { pageId, key, selected: ["main","test"], count: 2 }
+});
+```
+
+`pick.mode` 取值：
+
+| mode | 对话框 | 返回 |
+| --- | --- | --- |
+| `save` | 另存为 | 目标文件路径（可能不存在） |
+| `open` | 打开文件 | 选中的文件路径 |
+| `dir` | 选择文件夹 | 目录路径 |
+| `auto` | 勾选 1 行时「另存为」，否则「选择文件夹」 | 文件或目录路径 |
+
+对话框由管理器（C++ 侧）弹出，**不要在脚本里同步等待输入**；用户取消时回调仍会被调用，
+只是 `info.path` 为空字符串。勾选表格的选择状态由页面视图维护，脚本重绘时通过
+`selected` 传回来即可保持勾选。
 
 ### 5.4 服务器数据
 
@@ -333,6 +389,7 @@ mcsm.events.on("app.ready",           function (payload) { /* payload.pluginCoun
 | `server.selected` | 用户切换当前服务器 | `{serverId}` |
 | `environment.changed` | 环境自检（doctor）刷新 | doctor 结果 |
 | `theme.changed` | 主题 / 配色切换 | `{dark, style}` |
+| `ui.selection` | 可勾选表格（`selectable: true`）的勾选变化 | `{pageId, key, selected, count}` |
 
 ### 5.7 数据存储
 

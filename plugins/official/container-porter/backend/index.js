@@ -5,7 +5,9 @@
  *   { apiVersion, plugin, method, params, caller, pluginsDir, dataDir, requestedAt }
  *
  * 支持的方法（参数直接编码在方法名里，避免命令行里的引号/空格被吃掉）：
- *   export~<服务器id>~<0|1|2>   导出容器包；0=数据+配置，1=再带容器镜像，2=再带备份与日志
+ *   export~<服务器id[,id]>~<0|1|2>[~<encodeURIComponent(目标文件或目录)>]
+ *                               导出容器包；0=数据+配置，1=再带容器镜像，2=再带备份与日志
+ *                               单选一个服务器时可指定 .tar 文件，多选时给目录
  *   import~<encodeURIComponent(文件路径)>   把容器包导入成一台新服务器
  *   scan                        列出导出目录里可导入的 .tar 容器包
  *   open-folder                 打开导出目录
@@ -61,6 +63,16 @@ function slugify(text) {
         .replace(/[^a-z0-9_-]+/g, "-")
         .replace(/^-+|-+$/g, "");
     return slug || "server";
+}
+
+/// 保留中文等可读字符，只替换掉 Windows 文件名里不允许的符号。
+function safeFileName(text) {
+    const name = String(text || "")
+        .replace(/[\\/:*?"<>|\r\n\t]+/g, "_")
+        .replace(/\s+/g, " ")
+        .replace(/^[. ]+|[. ]+$/g, "")
+        .slice(0, 60);
+    return name || "server";
 }
 
 function run(cmd, args, options) {
@@ -195,7 +207,7 @@ function uniqueId(servers, wanted) {
 
 // ------------------------------------------------------------------ 导出 ---
 
-function exportContainer(request, serverId, mode) {
+function exportContainer(request, serverId, mode, target, asFile) {
     const root = dataRootOf(request);
     if (!root) return fail("NO_DATA_ROOT", "无法定位管理器数据目录");
 
@@ -269,8 +281,20 @@ function exportContainer(request, serverId, mode) {
     };
     fs.writeFileSync(path.join(work, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
 
-    const bundleName = slugify(record.name || serverId) + "-" + stamp() + ".tar";
-    const bundle = path.join(exportsDir, bundleName);
+    const bundleName = safeFileName(record.name || serverId) + "-" + stamp() + ".tar";
+    let bundle = path.join(exportsDir, bundleName);
+    if (target) {
+        // One server -> the user picked a file to save; several servers -> the
+        // user picked a folder and every bundle lands inside it.
+        const dirTarget = !asFile || !/\.tar$/i.test(target);
+        bundle = dirTarget ? path.join(target, bundleName) : target;
+        try {
+            fs.mkdirSync(path.dirname(bundle), { recursive: true });
+        } catch (error) {
+            cleanup(work);
+            return fail("TARGET_INVALID", "无法创建导出目录", String(error.message || error));
+        }
+    }
     const parts = ["manifest.json", "data.tar"];
     if (packagedImage) parts.push("image.tar");
     progress("生成容器包 " + bundleName + " …");
@@ -513,10 +537,22 @@ function handle(request) {
     }
     if (method.indexOf("export~") === 0) {
         const parts = method.split("~");
-        const serverId = decodeURIComponent(parts[1] || "");
+        // export~<id,id,...>~<0|1|2>~<encodeURIComponent(目标文件或目录)>
+        const ids = String(parts[1] || "").split(",")
+            .map((id) => decodeURIComponent(id).trim())
+            .filter((id) => id.length > 0);
         const mode = Number(parts[2] || 0);
-        if (!serverId) return fail("INVALID_ARGUMENT", "export 缺少服务器 id");
-        return exportContainer(request, serverId, mode === 2 ? 2 : (mode === 1 ? 1 : 0));
+        const target = parts.length > 3 ? decodeURIComponent(parts.slice(3).join("~")) : "";
+        if (!ids.length) return fail("INVALID_ARGUMENT", "export 缺少服务器 id");
+        const files = [];
+        for (const serverId of ids) {
+            const one = exportContainer(request, serverId, mode === 2 ? 2 : (mode === 1 ? 1 : 0),
+                                        target, ids.length === 1);
+            if (!one.ok) return one;
+            files.push(one.data);
+        }
+        const totalBytes = files.reduce((sum, item) => sum + (item.sizeBytes || 0), 0);
+        return ok({ files: files, count: files.length, totalBytes: totalBytes, mode: mode });
     }
     if (method.indexOf("import~") === 0) {
         const file = decodeURIComponent(method.slice("import~".length));

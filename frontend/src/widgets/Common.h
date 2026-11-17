@@ -269,6 +269,9 @@ protected:
 
     /// Layout that page content should be appended to.
     QVBoxLayout *body() const { return m_body; }
+    /// Scroll area that wraps the body: pages that rebuild their content on the
+    /// fly use it to keep the reading position instead of jumping to the top.
+    QScrollArea *scrollArea() const { return m_scroll; }
     void setHeaderTrailing(QWidget *widget);
     /// Puts `widget` in a column LEFT of the scrolling body. That column never
     /// scrolls, so a page menu stays visible no matter how long the content is.

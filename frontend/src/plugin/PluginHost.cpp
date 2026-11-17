@@ -184,6 +184,29 @@ void PluginApi::openPage(const QString &pageId) const
     m_host->requestPageOpen(pageId);
 }
 
+void PluginApi::onAction(const QString &pageId, const QString &actionId, const QJSValue &handler)
+{
+    if (!handler.isCallable() || pageId.trimmed().isEmpty() || actionId.trimmed().isEmpty())
+        return;
+    m_actions[pageId.trimmed() + QLatin1Char('/') + actionId.trimmed()].append(handler);
+}
+
+bool PluginApi::runAction(const QString &pageId, const QString &actionId, const QJsonObject &payload)
+{
+    const auto it = m_actions.constFind(pageId.trimmed() + QLatin1Char('/') + actionId.trimmed());
+    if (it == m_actions.constEnd() || it.value().isEmpty())
+        return false;
+    QVariantMap info = payload.toVariantMap();
+    info.insert(QStringLiteral("pageId"), pageId);
+    info.insert(QStringLiteral("action"), actionId);
+    const QJSValue argument = m_engine->toScriptValue(info);
+    for (const QJSValue &handler : it.value()) {
+        if (!m_host->dispatchOne(pluginId(), m_engine, handler, argument))
+            return true;
+    }
+    return true;
+}
+
 QJSValue PluginApi::storageGet(const QString &key) const
 {
     return m_engine->toScriptValue(m_host->storageValue(pluginId(), key));
@@ -423,6 +446,7 @@ void PluginHost::loadFrontendPlugins()
         ui.setProperty(QStringLiteral("registerPage"), wrapped.property(QStringLiteral("registerPage")));
         ui.setProperty(QStringLiteral("setPageContent"), wrapped.property(QStringLiteral("setPageContent")));
         ui.setProperty(QStringLiteral("openPage"), wrapped.property(QStringLiteral("openPage")));
+        ui.setProperty(QStringLiteral("onAction"), wrapped.property(QStringLiteral("onAction")));
         mcsm.setProperty(QStringLiteral("ui"), ui);
 
         QJSValue storage = engine->newObject();
@@ -682,6 +706,22 @@ void PluginHost::dispatchEvent(const QString &event, const QJsonObject &payload)
 {
     for (PluginApi *api : m_apis)
         api->dispatch(event, payload);
+}
+
+bool PluginHost::invokeAction(const QString &pageId, const QString &actionId,
+                              const QJsonObject &payload)
+{
+    const QString pluginId = pagePluginId(pageId);
+    if (pluginId.isEmpty())
+        return false;
+    for (PluginApi *api : m_apis) {
+        if (api->pluginId() != pluginId)
+            continue;
+        if (pluginIsQuarantined(pluginId))
+            return false;
+        return api->runAction(pageId, actionId, payload);
+    }
+    return false;
 }
 
 } // namespace mcsm

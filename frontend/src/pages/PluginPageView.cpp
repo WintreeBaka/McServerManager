@@ -1,7 +1,9 @@
 #include "pages/PluginPageView.h"
 
 #include <QDateTime>
+#include <QCheckBox>
 #include <QDesktopServices>
+#include <QFileDialog>
 #include <QFont>
 #include <QGridLayout>
 #include <QHeaderView>
@@ -12,7 +14,10 @@
 #include <QProcess>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QTableWidget>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -28,8 +33,12 @@ void clearLayout(QLayout *layout)
     if (!layout)
         return;
     while (QLayoutItem *item = layout->takeAt(0)) {
-        if (QWidget *widget = item->widget())
+        if (QWidget *widget = item->widget()) {
+            // hide first: a deferred delete would otherwise flash the old block
+            // on top of the rebuilt one for one frame.
+            widget->hide();
             widget->deleteLater();
+        }
         if (QLayout *child = item->layout())
             clearLayout(child);
         delete item;
@@ -43,6 +52,35 @@ QString blockStyle(const QJsonObject &block, const QString &fallback)
         || style == QLatin1String("subtitle") || style == QLatin1String("title"))
         return style;
     return fallback;
+}
+
+/// Runs the native dialog a button asked for: {mode: save|open|dir|auto, ...}.
+/// `auto` means "save when exactly one row is ticked, otherwise pick a folder",
+/// which is what "export the selected servers" needs.
+QString pickPath(const QJsonObject &pick, QWidget *parent, int selectedRows)
+{
+    QString mode = pick.value(QStringLiteral("mode")).toString(QStringLiteral("open")).toLower();
+    if (mode == QLatin1String("auto"))
+        mode = selectedRows == 1 ? QStringLiteral("save") : QStringLiteral("dir");
+    const QString title = pick.value(QStringLiteral("title")).toString(QStringLiteral("选择文件"));
+    const QString filter = pick.value(QStringLiteral("filter")).toString(QStringLiteral("所有文件 (*.*)"));
+    QString start = pick.value(QStringLiteral("defaultPath")).toString();
+    const QString defaultName = pick.value(QStringLiteral("defaultName")).toString();
+    if (mode == QLatin1String("save") && !defaultName.isEmpty()) {
+        if (start.isEmpty())
+            start = defaultName;
+        else if (start.endsWith(QLatin1Char('/')) || start.endsWith(QLatin1Char('\\')))
+            start += defaultName;
+        else
+            start += QLatin1Char('/') + defaultName;
+    }
+    if (mode == QLatin1String("save"))
+        return QFileDialog::getSaveFileName(parent, title, start, filter);
+    if (mode == QLatin1String("dir") || mode == QLatin1String("folder"))
+        return QFileDialog::getExistingDirectory(parent, title, start,
+                                                 QFileDialog::ShowDirsOnly
+                                                     | QFileDialog::DontResolveSymlinks);
+    return QFileDialog::getOpenFileName(parent, title, start, filter);
 }
 
 } // namespace
@@ -77,8 +115,17 @@ void PluginPageView::rebuild()
 {
     if (!m_layout)
         return;
+    // Rebuilding swaps every widget: without this the page jumps back to the
+    // top (or scrolls to a stale focused row) whenever the script redraws.
+    QScrollBar *scrollBar = nullptr;
+    int scrolled = 0;
+    if (QScrollArea *area = scrollArea()) {
+        scrollBar = area->verticalScrollBar();
+        scrolled = scrollBar->value();
+    }
     clearLayout(m_layout);
     m_log = nullptr;
+    m_selection.clear();
 
     if (m_blocks.isEmpty()) {
         auto *empty = new CardFrame(m_container);
@@ -100,6 +147,13 @@ void PluginPageView::rebuild()
     for (const QString &line : m_pendingLog)
         appendLog(line);
     m_pendingLog.clear();
+
+    if (scrollBar) {
+        scrollBar->setValue(scrolled);
+        QTimer::singleShot(0, this, [scrollBar, scrolled] {
+            scrollBar->setValue(scrolled);
+        });
+    }
 }
 
 QWidget *PluginPageView::buildBlock(const QJsonObject &block)
@@ -174,15 +228,51 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         auto *card = new CardFrame(m_container);
         auto *layout = CardFrame::verticalLayout(card, 18, 10);
         const QString title = block.value(QStringLiteral("title")).toString();
-        if (!title.isEmpty())
-            layout->addWidget(makeSectionHeader(title, QString(), nullptr, card));
-
-        auto *table = new QTableWidget(card);
         const QJsonArray columns = block.value(QStringLiteral("columns")).toArray();
         const QJsonArray rows = block.value(QStringLiteral("rows")).toArray();
-        table->setColumnCount(columns.size());
+        // selectable: one checkbox column in front of the data columns. The
+        // selection is pushed to the plugin (event "ui.selection") so the page
+        // can react - export commands need to know which servers are ticked.
+        const bool selectable = block.value(QStringLiteral("selectable")).toBool();
+        const QString selectionKey = block.value(QStringLiteral("key")).toString(QStringLiteral("default"));
+
+        auto *head = new QWidget(card);
+        auto *headLayout = new QHBoxLayout(head);
+        headLayout->setContentsMargins(0, 0, 0, 0);
+        headLayout->setSpacing(8);
+        if (!title.isEmpty())
+            headLayout->addWidget(makeSectionHeader(title, QString(), nullptr, head));
+        headLayout->addStretch(1);
+        QLabel *selectionLabel = nullptr;
+        if (selectable) {
+            selectionLabel = makeLabel(QString(), QStringLiteral("hint"), head);
+            headLayout->addWidget(selectionLabel);
+            auto *allButton = new GradientButton(QStringLiteral("全选"), head);
+            allButton->setCompact(true);
+            allButton->setStyle(GradientButton::Outline);
+            auto *noneButton = new GradientButton(QStringLiteral("全不选"), head);
+            noneButton->setCompact(true);
+            noneButton->setStyle(GradientButton::Outline);
+            headLayout->addWidget(allButton);
+            headLayout->addWidget(noneButton);
+            QObject::connect(allButton, &QPushButton::clicked, this, [this, card]() {
+                for (QCheckBox *box : card->findChildren<QCheckBox *>())
+                    box->setChecked(true);
+            });
+            QObject::connect(noneButton, &QPushButton::clicked, this, [card]() {
+                for (QCheckBox *box : card->findChildren<QCheckBox *>())
+                    box->setChecked(false);
+            });
+        }
+        if (headLayout->count() > 1)
+            layout->addWidget(head);
+
+        auto *table = new QTableWidget(card);
+        table->setColumnCount(columns.size() + (selectable ? 1 : 0));
         table->setRowCount(rows.size());
         QStringList header;
+        if (selectable)
+            header << QString();
         for (const QJsonValue &column : columns)
             header << column.toString();
         table->setHorizontalHeaderLabels(header);
@@ -193,15 +283,100 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         table->setEditTriggers(QAbstractItemView::NoEditTriggers);
         table->setWordWrap(false);
         table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-        table->setStyleSheet(QStringLiteral("QTableWidget { background: transparent; border: none; }"));
+        // Headers used to be centred while cells were left aligned, which read as
+        // "the header does not line up with the columns".
+        table->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        table->horizontalHeader()->setHighlightSections(false);
+        if (selectable) {
+            // Fixed checkbox column. Order matters: setColumnWidth() before the
+            // resize-mode change is ignored, and the header clamps sections to
+            // minimumSectionSize() (25px), which clipped the checkbox to 0 width.
+            table->horizontalHeader()->setMinimumSectionSize(30);
+            table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+            table->setColumnWidth(0, 46);
+            table->verticalHeader()->setDefaultSectionSize(34);
+        }
+        table->setStyleSheet(QStringLiteral(
+            "QTableWidget { background: transparent; border: none; }"
+            "QTableWidget::item { padding-left: 10px; padding-right: 10px; }"));
+        table->horizontalHeader()->setStyleSheet(
+            QStringLiteral("QHeaderView::section { padding-left: 10px; padding-right: 10px;"
+                           " background: transparent; border: none; }"));
+
+        const QJsonArray rowIds = block.value(QStringLiteral("rowIds")).toArray();
+        QJsonArray preselected = block.value(QStringLiteral("selected")).toArray();
+        if (!m_selection.contains(selectionKey)) {
+            QStringList initial;
+            for (const QJsonValue &value : preselected)
+                initial << value.toString();
+            m_selection.insert(selectionKey, initial);
+        }
+        QStringList &selection = m_selection[selectionKey];
+        auto publishSelection = [this, selectionKey]() {
+            const QStringList ids = m_selection.value(selectionKey);
+            QJsonObject payload;
+            payload.insert(QStringLiteral("pageId"), m_info.id);
+            payload.insert(QStringLiteral("key"), selectionKey);
+            payload.insert(QStringLiteral("selected"), QJsonArray::fromStringList(ids));
+            payload.insert(QStringLiteral("count"), ids.size());
+            PluginHost *host = AppContext::instance()->plugins();
+            if (!host)
+                return;
+            // Queued: a handler may call setPageContent, which rebuilds (and
+            // destroys) the very checkbox whose signal is still running.
+            QMetaObject::invokeMethod(host, [host, payload]() {
+                host->dispatchEvent(QStringLiteral("ui.selection"), payload);
+            }, Qt::QueuedConnection);
+        };
+        if (selectionLabel)
+            selectionLabel->setText(QStringLiteral("已选 %1 台").arg(selection.size()));
+
         for (int row = 0; row < rows.size(); ++row) {
             const QJsonArray cells = rows.at(row).toArray();
+            QString rowId = rowIds.size() > row ? rowIds.at(row).toString() : QString();
+            if (rowId.isEmpty())
+                rowId = cells.isEmpty() ? QString::number(row) : cells.at(0).toString();
+            int columnOffset = 0;
+            if (selectable) {
+                auto *holder = new QWidget(table);
+                auto *holderLayout = new QHBoxLayout(holder);
+                holderLayout->setContentsMargins(10, 0, 0, 0);
+                holderLayout->setSpacing(0);
+                auto *box = new QCheckBox(holder);
+                box->setChecked(selection.contains(rowId));
+                box->setProperty("rowId", rowId);
+                holderLayout->addWidget(box);
+                holderLayout->addStretch(1);
+                table->setCellWidget(row, 0, holder);
+                QObject::connect(box, &QCheckBox::toggled, this,
+                                 [this, selectionKey, selectionLabel, publishSelection](bool checked) {
+                                     auto *box = qobject_cast<QCheckBox *>(sender());
+                                     if (!box)
+                                         return;
+                                     const QString id = box->property("rowId").toString();
+                                     QStringList &ids = m_selection[selectionKey];
+                                     if (checked) {
+                                         if (!ids.contains(id))
+                                             ids.append(id);
+                                     } else {
+                                         ids.removeAll(id);
+                                     }
+                                     if (selectionLabel)
+                                         selectionLabel->setText(
+                                             QStringLiteral("已选 %1 台").arg(ids.size()));
+                                     publishSelection();
+                                 });
+                columnOffset = 1;
+            }
             for (int column = 0; column < columns.size(); ++column) {
                 const QString text = column < cells.size() ? cells.at(column).toString() : QString();
-                table->setItem(row, column, new QTableWidgetItem(text));
+                auto *item = new QTableWidgetItem(text);
+                item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+                item->setFlags(Qt::ItemIsEnabled);
+                table->setItem(row, column + columnOffset, item);
             }
         }
-        const int height = qMin(60 + rows.size() * 30, 360);
+        const int height = qMin(60 + rows.size() * 34, 380);
         table->setMinimumHeight(height);
         layout->addWidget(table);
         return card;
@@ -227,6 +402,11 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
             const QString url = item.value(QStringLiteral("url")).toString();
             const QString toast = item.value(QStringLiteral("toast")).toString();
             const QString openUrlField = item.value(QStringLiteral("openUrlFrom")).toString();
+            const QString action = item.value(QStringLiteral("action")).toString();
+            // pick: {mode: save|open|dir, title, filter, defaultPath}. The dialog
+            // runs here (native, modal) and only the chosen path reaches the
+            // script - a plugin never blocks inside a JS callback.
+            const QJsonObject pick = item.value(QStringLiteral("pick")).toObject();
             // level: primary (default) / outline (ghost) / soft / danger.
             // The old hard-coded Soft was nearly transparent in dark mode, so
             // plugin buttons looked disabled and authors had no way to fix it.
@@ -239,14 +419,39 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
                 button->setStyle(GradientButton::Outline);
             else
                 button->setStyle(GradientButton::Primary);
-            connect(button, &QPushButton::clicked, this, [this, command, url, toast, openUrlField]() {
-                if (!url.isEmpty()) {
-                    QDesktopServices::openUrl(QUrl(url));
-                    return;
-                }
-                if (!command.isEmpty())
-                    runCommand(command, toast, openUrlField);
-            });
+            connect(button, &QPushButton::clicked, this,
+                    [this, command, url, toast, openUrlField, action, pick]() {
+                        if (!action.isEmpty()) {
+                            // Script-backed button: the plugin decides what to do
+                            // (ask for a path, then start the export).
+                            PluginHost *host = AppContext::instance()->plugins();
+                            if (!host) {
+                                appendLog(QStringLiteral("! 插件宿主未就绪"));
+                                return;
+                            }
+                            QJsonObject payload;
+                            if (!pick.isEmpty()) {
+                                int selectedRows = 0;
+                                for (auto it = m_selection.constBegin(); it != m_selection.constEnd(); ++it)
+                                    selectedRows += it.value().size();
+                                const QString path = pickPath(pick, this, selectedRows);
+                                if (path.isEmpty()) {
+                                    appendLog(QStringLiteral("已取消：没有选择路径"));
+                                    return;
+                                }
+                                payload.insert(QStringLiteral("path"), path);
+                            }
+                            if (!host->invokeAction(m_info.id, action, payload))
+                                appendLog(QStringLiteral("! 插件没有注册动作 %1").arg(action));
+                            return;
+                        }
+                        if (!url.isEmpty()) {
+                            QDesktopServices::openUrl(QUrl(url));
+                            return;
+                        }
+                        if (!command.isEmpty())
+                            runCommand(command, toast, openUrlField);
+                    });
             layout->addWidget(button);
         }
         layout->addStretch(1);
