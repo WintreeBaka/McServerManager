@@ -173,6 +173,11 @@ my-plugin-1.0.0.zip
 
 3. 识别不出内容、入口文件不存在、或 `apiVersion` 超出支持区间：**拒绝导入**并给出具体原因。
 
+**只装命令行的环境**：发行包 `McServerManager-<版本>-win64-cli.zip` 里只有 `mcsm-cli.exe`，
+没有桌面界面。这类机器上 `frontend` / `web` / `global` 作用域的插件虽然也能安装、后端也能调，
+但页面永远不会被打开 —— 实际使用请选 `scope: "backend"` 的插件
+（例如「容器搬运工」的 CLI 版 `com.mcsm.container-porter.cli`）。
+
 ### 4.3 apiVersion：整数区间
 
 `apiVersion` 是**整数**，不是语义化版本：管理器每增加**一批新接口**就 `+1`。

@@ -23,9 +23,24 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const readline = require("readline");
 
-const PLUGIN_ID = "com.mcsm.container-porter";
+/** 从安装目录里的 plugin.json 读版本号，避免升级插件后后端还报旧版本。 */
+function readOwnManifest() {
+    const candidates = [process.env.MCSM_PLUGIN_DIR, path.resolve(__dirname, "..")];
+    for (const dir of candidates) {
+        if (!dir) continue;
+        try {
+            return JSON.parse(fs.readFileSync(path.join(dir, "plugin.json"), "utf8"));
+        } catch (err) {
+            // 换下一个候选目录
+        }
+    }
+    return {};
+}
+
+const MANIFEST = readOwnManifest();
+const PLUGIN_ID = process.env.MCSM_PLUGIN_ID || MANIFEST.id || "com.mcsm.container-porter";
 const BUNDLE_FORMAT = "mcsm-container-porter/1";
-const PLUGIN_VERSION = "1.0.0";
+const PLUGIN_VERSION = MANIFEST.version || "0.0.0";
 const TAR = process.platform === "win32" ? "tar.exe" : "tar";
 const DOCKER_TIMEOUT = 30 * 60 * 1000;
 
@@ -115,6 +130,10 @@ function storeFile(root) {
 
 function readStore(root) {
     if (!root) return { ok: false, error: "无法定位管理器数据目录" };
+    // 全新安装的管理器还没有 servers.json，这属于「空注册表」而不是损坏。
+    if (!fs.existsSync(storeFile(root))) {
+        return { ok: true, data: { version: 1, servers: [] } };
+    }
     try {
         const raw = fs.readFileSync(storeFile(root), "utf8");
         const parsed = JSON.parse(raw);

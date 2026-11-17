@@ -5,7 +5,7 @@
 
 | 目录 | 用途 |
 | --- | --- |
-| [`official/`](official/) | 随本项目维护的官方插件：`container-porter`（容器搬运工）、`player-admin`（玩家管理） |
+| [`official/`](official/) | 随本项目维护的官方插件：`container-porter`（容器搬运工 · 完整版）、`container-porter-cli`（容器搬运工 · 只有后端的 CLI 版）、`player-admin`（玩家管理） |
 | [`community/`](community/) | 社区插件索引：只放清单与链接，不提交第三方二进制（预留） |
 | [`../examples/plugins/`](../examples/plugins/) | 可直接安装的示例插件（hello-panel / perf-tuner / ops-console） |
 

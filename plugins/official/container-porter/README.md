@@ -5,6 +5,16 @@
 
 这是 **管理器插件包**（Plugin SDK，apiVersion 1），不是 Minecraft 服务端插件。
 
+## 两个版本，选一个装
+
+| 版本 | 插件 id | 作用域 | 适用场景 |
+| --- | --- | --- | --- |
+| 完整版（本目录） | `com.mcsm.container-porter` | `global`（前端 + 后端） | 桌面管理器，左侧导航多出「导入与导出」页面 |
+| [CLI 版](../container-porter-cli/) | `com.mcsm.container-porter.cli` | `backend`（只有后端） | 只装了 `mcsm-cli` 的机器、服务器主机、脚本 / CI |
+
+两个包的**后端是同一份代码**，导出的 `.tar` 容器包格式一致、可以互相导入；差别只是 CLI 版没有
+`frontend/` 目录，也没有「导入与导出」页面，所有操作通过 `mcsm-cli plugin call` 完成。
+
 ## 功能
 
 安装并启用后，左侧导航会多出一个 **「导入与导出」** 页面：

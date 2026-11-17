@@ -1,7 +1,7 @@
 {
   "id": "com.mcsm.container-porter",
   "name": "容器搬运工",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "apiVersion": 1,
   "minManagerVersion": "1.2.0",
   "scope": "global",
