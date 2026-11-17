@@ -1,25 +1,24 @@
-<#
-    Assembles the portable Windows release from an already deployed build.
-
-    Prerequisites: run scripts\build-windows.ps1 -Deploy first, so that
-    build\bin contains the executables plus the Qt runtime.
-
-    Usage:
-        .\tools\package-release.ps1
-        .\tools\package-release.ps1 -Flavor with-plugins      # 追加示例插件包，名字带后缀
-        .\tools\package-release.ps1 -Version 1.2.0 -DistDir dist
-
-    Three flavours exist and they deliberately get **different** folder names:
-
-        McServerManager-<版本>-win64                含 GUI 的便携版
-        McServerManager-<版本>-win64-with-plugins   附加 plugin-packages\*.zip
-        McServerManager-<版本>-cli-win64            纯 CLI 精简版（无 Qt Widgets/Qml）
-#>
+﻿# Assembles the portable Windows release from an already deployed build.
+#
+# Prerequisites: run scripts\build-windows.ps1 -Deploy first, so that
+# build\bin contains the executables plus the Qt runtime.
+#
+# Usage:
+#     .\tools\package-release.ps1
+#     .\tools\package-release.ps1 -Flavor with-plugins             # 追加示例插件包
+#     .\tools\package-release.ps1 -Flavor with-container-porter    # 附带官方插件「容器搬运工」
+#     .\tools\package-release.ps1 -Version 1.2.0 -DistDir dist
+#
+# Flavours deliberately get different folder names:
+#     McServerManager-<版本>-win64                        含 GUI 的便携版
+#     McServerManager-<版本>-win64-with-plugins          附加 plugin-packages\*.zip
+#     McServerManager-<版本>-win64-with-container-porter 附带容器搬运工插件包
+#     McServerManager-<版本>-cli-win64                    纯 CLI 精简版（无 Qt Widgets/Qml）
 param(
     [string]$BinDir = "build\bin",
     [string]$DistDir = "dist",
     [string]$Version = "1.2.0",
-    [ValidateSet("plain", "with-plugins", "cli")]
+    [ValidateSet("plain", "with-plugins", "with-container-porter", "cli")]
     [string]$Flavor = "plain",
     [string]$QtBin = "D:\qt\6.11.2\mingw_64\bin",
     [string]$MinGwBin = "D:\qt\Tools\mingw1310_64\bin"
@@ -34,7 +33,7 @@ if (-not (Test-Path (Join-Path $BinDir "Qt6Core.dll"))) {
     Write-Warning "Qt6Core.dll not found next to the exe: run build-windows.ps1 -Deploy for a self-contained package"
 }
 
-$suffix = if ($Flavor -eq "with-plugins") { "-with-plugins" } elseif ($Flavor -eq "cli") { "-cli" } else { "" }
+$suffix = if ($Flavor -eq "with-plugins") { "-with-plugins" } elseif ($Flavor -eq "with-container-porter") { "-with-container-porter" } elseif ($Flavor -eq "cli") { "-cli" } else { "" }
 $name = "McServerManager-$Version-win64$suffix"
 $stage = Join-Path $DistDir $name
 if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
@@ -106,6 +105,32 @@ if ($Flavor -eq "with-plugins") {
     Copy-Item (Join-Path $pluginDir "*.zip") -Destination $target -Force
     $packages = (Get-ChildItem $target -Filter *.zip).Count
     Write-Host ("bundled {0} example plugin package(s)" -f $packages) -ForegroundColor Cyan
+}
+
+# "with-container-porter" flavour: ship the official 容器搬运工 plugin package so a
+# fresh copy can move a server container right away (设置 → 插件扩展 → 添加插件).
+if ($Flavor -eq "with-container-porter") {
+    $pluginId = "com.mcsm.container-porter"
+    $manifest = "plugins\official\container-porter\plugin.json"
+    $pluginZip = $null
+    if (Test-Path $manifest) {
+        $version = (Get-Content $manifest -Raw -Encoding UTF8 | ConvertFrom-Json).version
+        $pluginZip = Get-Item (Join-Path $DistDir "plugins\$pluginId-$version.zip") -ErrorAction SilentlyContinue
+    }
+    if (-not $pluginZip) {
+        $pluginZip = Get-ChildItem (Join-Path $DistDir "plugins") -Filter "$pluginId-*.zip" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    }
+    if (-not $pluginZip) {
+        throw "missing $DistDir\plugins\com.mcsm.container-porter-*.zip - run plugins\build-plugins.ps1 first"
+    }
+    $target = Join-Path $stage "plugin-packages"
+    New-Item -ItemType Directory -Force -Path $target | Out-Null
+    Copy-Item $pluginZip.FullName -Destination $target -Force
+    $note = "在管理器里打开 设置 → 插件扩展 → 添加插件，选择本目录的 {0}；`r`n也可以用命令行安装：mcsm-cli plugin package install --zip `"{0}`"。" -f $pluginZip.Name
+    Set-Content -Path (Join-Path $target "安装说明.txt") -Value $note -Encoding UTF8
+    Copy-Item "plugins\official\container-porter\README.md" -Destination $target -Force -ErrorAction SilentlyContinue
+    Write-Host ("bundled {0}" -f $pluginZip.Name) -ForegroundColor Cyan
 }
 
 $total = (Get-ChildItem $stage -Recurse -File | Measure-Object -Property Length -Sum).Sum

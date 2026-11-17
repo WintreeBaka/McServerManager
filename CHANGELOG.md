@@ -19,6 +19,8 @@
 * `buttons` 新增 `action`（点击直接回调脚本，见 `mcsm.ui.onAction`）与 `pick`
   （`save` / `open` / `dir` / `auto`，先弹原生文件对话框再把路径交给回调）。
 * 修复插件页表格表头与内容不对齐（表头改为左对齐并统一内边距）。
+* 容器搬运工 0.2.1：修复插件页表格勾选框右侧被裁、左侧留白过大 —— 勾选框列改为固定列宽，
+  文本内边距改由 delegate 绘制（QSS 的 `item` padding 会连 cell widget 一起内缩）。
 
 ## 1.2.0
 

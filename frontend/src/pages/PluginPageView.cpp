@@ -16,6 +16,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QStyledItemDelegate>
 #include <QTableWidget>
 #include <QTimer>
 #include <QUrl>
@@ -53,6 +54,30 @@ QString blockStyle(const QJsonObject &block, const QString &fallback)
         return style;
     return fallback;
 }
+
+/// QSS `::item { padding-left }` also insets cell *widgets*, which pushed the
+/// checkbox 10px right of the column edge, so the text padding is drawn by a
+/// delegate instead and the widget lands flush with the column.
+class PaddedDelegate : public QStyledItemDelegate
+{
+public:
+    explicit PaddedDelegate(int horizontal, QObject *parent = nullptr)
+        : QStyledItemDelegate(parent)
+        , pad_(horizontal)
+    {
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override
+    {
+        QStyleOptionViewItem adjusted = option;
+        adjusted.rect = option.rect.adjusted(pad_, 0, -pad_, 0);
+        QStyledItemDelegate::paint(painter, adjusted, index);
+    }
+
+private:
+    int pad_;
+};
 
 /// Runs the native dialog a button asked for: {mode: save|open|dir|auto, ...}.
 /// `auto` means "save when exactly one row is ticked, otherwise pick a folder",
@@ -225,20 +250,26 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
     }
 
     if (type == QLatin1String("table")) {
-        auto *card = new CardFrame(m_container);
-        auto *layout = CardFrame::verticalLayout(card, 18, 10);
-        const QString title = block.value(QStringLiteral("title")).toString();
-        const QJsonArray columns = block.value(QStringLiteral("columns")).toArray();
-        const QJsonArray rows = block.value(QStringLiteral("rows")).toArray();
         // selectable: one checkbox column in front of the data columns. The
         // selection is pushed to the plugin (event "ui.selection") so the page
         // can react - export commands need to know which servers are ticked.
         const bool selectable = block.value(QStringLiteral("selectable")).toBool();
         const QString selectionKey = block.value(QStringLiteral("key")).toString(QStringLiteral("default"));
+        auto *card = new CardFrame(m_container);
+        auto *layout = CardFrame::verticalLayout(card, 18, 10);
+        if (selectable) {
+            // The tick column hugs the card edge, so the table is outdented by
+            // 14px; the header row re-adds that inset in its own margins so the
+            // card title still lines up with the neighbouring cards.
+            layout->setContentsMargins(14, 18, 18, 18);
+        }
+        const QString title = block.value(QStringLiteral("title")).toString();
+        const QJsonArray columns = block.value(QStringLiteral("columns")).toArray();
+        const QJsonArray rows = block.value(QStringLiteral("rows")).toArray();
 
         auto *head = new QWidget(card);
         auto *headLayout = new QHBoxLayout(head);
-        headLayout->setContentsMargins(0, 0, 0, 0);
+        headLayout->setContentsMargins(selectable ? 4 : 0, 0, 0, 0);
         headLayout->setSpacing(8);
         if (!title.isEmpty())
             headLayout->addWidget(makeSectionHeader(title, QString(), nullptr, head));
@@ -290,21 +321,22 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         if (selectable) {
             // Fixed checkbox column. Order matters: setColumnWidth() before the
             // resize-mode change is ignored, and the header clamps sections to
-            // minimumSectionSize() (25px), which clipped the checkbox to 0 width.
-            table->horizontalHeader()->setMinimumSectionSize(30);
+            // minimumSectionSize(), which used to squeeze the cell widget and clip
+            // the indicator mid-draw.
+            table->horizontalHeader()->setMinimumSectionSize(44);
             table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
-            table->setColumnWidth(0, 46);
+            table->setColumnWidth(0, 56);
             table->verticalHeader()->setDefaultSectionSize(34);
-        }
+        }        // Text padding is drawn by the delegate; a QSS `::item` padding would
+        // also push the checkbox cell widget away from the column edge.
+        table->setItemDelegate(new PaddedDelegate(10, table));
         table->setStyleSheet(QStringLiteral(
-            "QTableWidget { background: transparent; border: none; }"
-            "QTableWidget::item { padding-left: 10px; padding-right: 10px; }"));
+            "QTableWidget { background: transparent; border: none; }"));
         table->horizontalHeader()->setStyleSheet(
             QStringLiteral("QHeaderView::section { padding-left: 10px; padding-right: 10px;"
                            " background: transparent; border: none; }"));
 
-        const QJsonArray rowIds = block.value(QStringLiteral("rowIds")).toArray();
-        QJsonArray preselected = block.value(QStringLiteral("selected")).toArray();
+        const QJsonArray rowIds = block.value(QStringLiteral("rowIds")).toArray();        QJsonArray preselected = block.value(QStringLiteral("selected")).toArray();
         if (!m_selection.contains(selectionKey)) {
             QStringList initial;
             for (const QJsonValue &value : preselected)
@@ -340,12 +372,15 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
             if (selectable) {
                 auto *holder = new QWidget(table);
                 auto *holderLayout = new QHBoxLayout(holder);
-                holderLayout->setContentsMargins(10, 0, 0, 0);
+                // Zero insets: the checkbox has to sit on the card's left text
+                // column, and QSS item padding would otherwise push it right.
+                holderLayout->setContentsMargins(9, 0, 0, 0);
                 holderLayout->setSpacing(0);
                 auto *box = new QCheckBox(holder);
+                box->setFixedSize(20, 20);
                 box->setChecked(selection.contains(rowId));
                 box->setProperty("rowId", rowId);
-                holderLayout->addWidget(box);
+                holderLayout->addWidget(box, 0, Qt::AlignLeft | Qt::AlignVCenter);
                 holderLayout->addStretch(1);
                 table->setCellWidget(row, 0, holder);
                 QObject::connect(box, &QCheckBox::toggled, this,
@@ -379,6 +414,7 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         const int height = qMin(60 + rows.size() * 34, 380);
         table->setMinimumHeight(height);
         layout->addWidget(table);
+
         return card;
     }
 
