@@ -30,6 +30,8 @@ DashboardPage::DashboardPage(QWidget *parent)
     body()->addLayout(columns, 1);
 
     connect(AppContext::instance(), &AppContext::activityAdded, this, &DashboardPage::onActivity);
+    connect(AppContext::instance(), &AppContext::environmentChanged,
+            this, &DashboardPage::onEnvironmentChanged);
     connect(AppContext::instance()->servers(), &ServerModel::changed, this, &DashboardPage::onServersChanged);
     onServersChanged();
 }
@@ -196,6 +198,11 @@ void DashboardPage::onActivity(const QString &message, const QString &level)
     m_emptyHint->setVisible(m_activityList->count() == 0);
 }
 
+void DashboardPage::onEnvironmentChanged(const QJsonObject &doctor)
+{
+    applyDoctor(doctor, QStringList());
+}
+
 void DashboardPage::onServersChanged()
 {
     ServerModel *model = AppContext::instance()->servers();
@@ -239,10 +246,6 @@ void DashboardPage::refresh()
                                  QStringLiteral("error"));
     });
 
-    // keep the environment card in sync with the periodic environment refresh
-    connect(context, &AppContext::environmentChanged, this,
-            [this](const QJsonObject &doctor) { applyDoctor(doctor, QStringList()); },
-            Qt::UniqueConnection);
     context->refreshEnvironment();
     if (!context->environment().isEmpty())
         applyDoctor(context->environment(), QStringList());

@@ -26,6 +26,7 @@ signals:
 
 private slots:
     void onActivity(const QString &message, const QString &level);
+    void onEnvironmentChanged(const QJsonObject &doctor);
     void onServersChanged();
 
 private:
