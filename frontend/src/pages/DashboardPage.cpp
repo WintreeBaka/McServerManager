@@ -32,7 +32,10 @@ DashboardPage::DashboardPage(QWidget *parent)
     connect(AppContext::instance(), &AppContext::activityAdded, this, &DashboardPage::onActivity);
     connect(AppContext::instance(), &AppContext::environmentChanged,
             this, &DashboardPage::onEnvironmentChanged);
+    connect(AppContext::instance(), &AppContext::themeChanged,
+            this, &DashboardPage::applyTheme);
     connect(AppContext::instance()->servers(), &ServerModel::changed, this, &DashboardPage::onServersChanged);
+    applyTheme();
     onServersChanged();
 }
 
@@ -133,18 +136,19 @@ QWidget *DashboardPage::buildEnvironmentCard()
     layout->addWidget(makeSectionHeader(QStringLiteral("运行环境"),
                                         QStringLiteral("后端、Docker 与 JDK 状态"), nullptr, card));
 
-    auto makeRow = [card](const QString &label, const QString &glyph, QLabel **value, QLabel **hint) {
+    auto makeRow = [card](const QString &label, const QString &glyph, QLabel **icon,
+                          QLabel **value, QLabel **hint) {
         auto *row = new QWidget(card);
         auto *rowLayout = new QHBoxLayout(row);
         rowLayout->setContentsMargins(0, 0, 0, 0);
         rowLayout->setSpacing(10);
 
-        auto *icon = new QLabel(glyph, row);
-        icon->setFixedSize(30, 30);
-        icon->setAlignment(Qt::AlignCenter);
+        *icon = new QLabel(glyph, row);
+        (*icon)->setFixedSize(30, 30);
+        (*icon)->setAlignment(Qt::AlignCenter);
         const Palette &palette = ThemeManager::instance()->palette();
-        icon->setStyleSheet(QStringLiteral("border-radius: 10px; background: %1; color: %2;")
-                                .arg(palette.surfaceAlt.name(), palette.text.name()));
+        (*icon)->setStyleSheet(QStringLiteral("border-radius: 10px; background: %1; color: %2;")
+                                   .arg(palette.surfaceAlt.name(), palette.text.name()));
 
         auto *column = new QVBoxLayout();
         column->setSpacing(2);
@@ -160,17 +164,17 @@ QWidget *DashboardPage::buildEnvironmentCard()
         column->addWidget(*value);
         column->addWidget(*hint);
 
-        rowLayout->addWidget(icon, 0, Qt::AlignTop);
+        rowLayout->addWidget(*icon, 0, Qt::AlignTop);
         rowLayout->addLayout(column, 1);
         return row;
     };
 
     layout->addWidget(makeRow(QStringLiteral("Docker 守护进程"), QStringLiteral("◈"),
-                              &m_dockerValue, &m_dockerHint));
+                              &m_dockerIcon, &m_dockerValue, &m_dockerHint));
     layout->addWidget(makeRow(QStringLiteral("容器化 JDK"), QStringLiteral("☕"),
-                              &m_javaValue, &m_javaHint));
+                              &m_javaIcon, &m_javaValue, &m_javaHint));
     layout->addWidget(makeRow(QStringLiteral("数据目录"), QStringLiteral("▣"),
-                              &m_homeValue, &m_homeHint));
+                              &m_homeIcon, &m_homeValue, &m_homeHint));
 
     m_diskBar = new QProgressBar(card);
     m_diskBar->setRange(0, 100);
@@ -201,6 +205,23 @@ void DashboardPage::onActivity(const QString &message, const QString &level)
 void DashboardPage::onEnvironmentChanged(const QJsonObject &doctor)
 {
     applyDoctor(doctor, QStringList());
+}
+
+void DashboardPage::applyTheme()
+{
+    const Palette &palette = ThemeManager::instance()->palette();
+    const QString iconStyle = QStringLiteral("border-radius: 10px; background: %1; color: %2;")
+                                  .arg(palette.surfaceAlt.name(), palette.text.name());
+    for (QLabel *icon : {m_dockerIcon, m_javaIcon, m_homeIcon}) {
+        if (icon)
+            icon->setStyleSheet(iconStyle);
+    }
+
+    // Status labels also bake semantic colours into inline styles. Reapplying the
+    // cached doctor result keeps them consistent with the new palette.
+    const QJsonObject environment = AppContext::instance()->environment();
+    if (!environment.isEmpty())
+        applyDoctor(environment, QStringList());
 }
 
 void DashboardPage::onServersChanged()

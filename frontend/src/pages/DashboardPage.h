@@ -28,6 +28,7 @@ private slots:
     void onActivity(const QString &message, const QString &level);
     void onEnvironmentChanged(const QJsonObject &doctor);
     void onServersChanged();
+    void applyTheme();
 
 private:
     QWidget *buildHero();
@@ -44,10 +45,13 @@ private:
 
     QLabel *m_dockerValue = nullptr;
     QLabel *m_dockerHint = nullptr;
+    QLabel *m_dockerIcon = nullptr;
     QLabel *m_javaValue = nullptr;
     QLabel *m_javaHint = nullptr;
+    QLabel *m_javaIcon = nullptr;
     QLabel *m_homeValue = nullptr;
     QLabel *m_homeHint = nullptr;
+    QLabel *m_homeIcon = nullptr;
     QProgressBar *m_diskBar = nullptr;
     QListWidget *m_activityList = nullptr;
     QLabel *m_emptyHint = nullptr;
