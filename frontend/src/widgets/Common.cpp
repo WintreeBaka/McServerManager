@@ -1,5 +1,6 @@
 #include "widgets/Common.h"
 
+#include <QDesktopServices>
 #include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -10,6 +11,7 @@
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include "app/Easing.h"
@@ -38,6 +40,17 @@ QColor blend(const QColor &from, const QColor &to, qreal t)
 }
 
 } // namespace
+
+bool safeOpenUrl(const QString &url)
+{
+    const QUrl target = QUrl::fromUserInput(url.trimmed());
+    if (!target.isValid() || target.isRelative())
+        return false;
+    const QString scheme = target.scheme().toLower();
+    if (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
+        return false;
+    return QDesktopServices::openUrl(target);
+}
 
 CardFrame::CardFrame(QWidget *parent)
     : QFrame(parent)

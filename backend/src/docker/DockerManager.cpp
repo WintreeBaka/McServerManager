@@ -236,8 +236,27 @@ ProcessResult DockerManager::runContainer(const ServerRecord &record,
                  << QStringLiteral("%1=%2").arg(it.key(), it.value().toVariant().toString());
         }
         const QStringList extra = Json::toList(patch.value(QStringLiteral("dockerArgs")));
-        for (const QString &flag : extra) {
-            if (!flag.trimmed().isEmpty())
+        for (int index = 0; index < extra.size(); ++index) {
+            const QString flag = extra.at(index).trimmed();
+            const QString lower = flag.toLower();
+            const bool privileged = lower == QLatin1String("--privileged")
+                || lower.startsWith(QLatin1String("--privileged="));
+            const bool volume = lower == QLatin1String("-v")
+                || lower.startsWith(QLatin1String("-v="))
+                || lower == QLatin1String("--volume")
+                || lower.startsWith(QLatin1String("--volume="));
+            const bool networkHost = lower == QLatin1String("--network=host")
+                || lower == QLatin1String("--net=host")
+                || ((lower == QLatin1String("--network") || lower == QLatin1String("--net"))
+                    && index + 1 < extra.size()
+                    && extra.at(index + 1).trimmed().compare(QLatin1String("host"),
+                                                            Qt::CaseInsensitive) == 0);
+            if (privileged || volume || networkHost) {
+                if (error)
+                    *error = QStringLiteral("插件 dockerArgs 包含被禁止的参数：%1").arg(flag);
+                return ProcessResult {};
+            }
+            if (!flag.isEmpty())
                 args << flag;
         }
     }

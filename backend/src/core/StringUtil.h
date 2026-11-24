@@ -18,6 +18,7 @@ public:
     static QString tailLines(const QString &text, int maxLines);
     static QString stripAnsi(const QString &text);
     static QString ellipsize(const QString &text, int maxChars);
+    static bool isSafeLevelName(const QString &value);
     static QString randomToken(int length);
     static QString joinArgs(const QStringList &args);
 };

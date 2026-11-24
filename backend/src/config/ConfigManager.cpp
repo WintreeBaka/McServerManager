@@ -42,7 +42,7 @@ bool writeTextLf(const QString &path, const QString &content, QString *error)
 
 /// server.properties is line based: a newline or an `=`/`:` inside a key would
 /// silently inject another property (e.g. turning enable-rcon off).
-bool isSafePropertyPair(const QString &key, const QString &value, QString *why)
+bool isSafePropertyPairImpl(const QString &key, const QString &value, QString *why)
 {
     static const QRegularExpression keyPattern(QStringLiteral("^[A-Za-z0-9._-]+$"));
     if (!keyPattern.match(key).hasMatch()) {
@@ -93,10 +93,15 @@ bool writeIndex(const QString &dir, const QJsonObject &object, QString *error)
 
 QString timestampId()
 {
-    return QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    return QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"));
 }
 
 } // namespace
+
+bool ConfigManager::isSafePropertyPair(const QString &key, const QString &value, QString *why)
+{
+    return isSafePropertyPairImpl(key, value, why);
+}
 
 QJsonObject ConfigDiffEntry::toJson() const
 {
@@ -298,7 +303,7 @@ bool ConfigManager::applyValues(const ServerRecord &record,
 
     for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
         QString why;
-        if (!isSafePropertyPair(it.key(), it.value(), &why)) {
+        if (!ConfigManager::isSafePropertyPair(it.key(), it.value(), &why)) {
             if (error)
                 *error = why;
             return false;

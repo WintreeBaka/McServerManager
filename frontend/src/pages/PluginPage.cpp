@@ -176,7 +176,7 @@ void PluginPage::search()
                     layout->addWidget(open, 0, Qt::AlignVCenter);
                     const QString url = hit.value(QStringLiteral("pageUrl")).toString();
                     connect(open, &QPushButton::clicked, this, [url]() {
-                        QDesktopServices::openUrl(QUrl(url));
+                        safeOpenUrl(url);
                     });
                 }
 

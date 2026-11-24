@@ -3,18 +3,19 @@
 
     需要一个 Gitea 访问令牌（设置 → 应用 → 生成令牌，至少 repository 读写）：
 
+        $env:GITEA_URL = "http://gitea.example.lan:3000"
         $env:GITEA_TOKEN = "xxxxxxxx"
         .\tools\create-gitea-release.ps1
 
-    默认发布 v1.2.1 到 http://192.168.1.82:3000/w/McServerManager，
+    仓库地址必须通过 -BaseUrl 或环境变量 GITEA_URL 提供。
     附件：GUI 便携版、纯 CLI 精简版、PLUGIN-SDK.md、官方玩家管理插件。
     已存在同名 Release 时会复用并补传缺失附件。
 #>
 param(
-    [string]$BaseUrl = "http://192.168.1.82:3000",
+    [string]$BaseUrl = $env:GITEA_URL,
     [string]$Owner = "w",
     [string]$Repo = "McServerManager",
-    [string]$Version = "1.2.1",
+    [string]$Version = "1.2.2",
     [string]$Tag = "",
     [string]$Title = "",
     [string]$NotesFile = "",
@@ -38,6 +39,9 @@ if ($Assets.Count -eq 0) {
     )
 }
 
+if (-not $BaseUrl) {
+    throw "缺少 Gitea 地址。请通过 -BaseUrl 或环境变量 GITEA_URL 提供（本地自托管可使用 http）。"
+}
 if (-not $Token) {
     throw @"
 缺少 Gitea 令牌。请先在 Gitea 生成：

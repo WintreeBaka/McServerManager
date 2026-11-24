@@ -264,7 +264,7 @@ Result CommandRouter::cmdInstall()
     request.javaMajor = m_args.intValue(QStringLiteral("java"), 0);
     request.image = m_args.value(QStringLiteral("image"));
     request.javaOptions = m_args.value(QStringLiteral("java-options"));
-    request.acceptEula = m_args.boolValue(QStringLiteral("eula"), true);
+    request.acceptEula = m_args.boolValue(QStringLiteral("eula"), false);
     request.manual = m_args.boolValue(QStringLiteral("manual"), false);
     request.manualJarPath = m_args.value(QStringLiteral("jar"));
     request.runtime = m_args.value(QStringLiteral("runtime"), QStringLiteral("docker"));
@@ -278,6 +278,12 @@ Result CommandRouter::cmdInstall()
         if (request.type.isEmpty())
             request.type = QStringLiteral("paper");
     }
+    if (!StringUtil::isSafeLevelName(request.levelName))
+        return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
+                            QStringLiteral("levelName 只允许 1-64 位字母、数字、空格、点、下划线和短横线，且不能包含 .."));
+    QString propertyError;
+    if (!ConfigManager::isSafePropertyPair(QStringLiteral("motd"), request.motd, &propertyError))
+        return Result::fail(QStringLiteral("INVALID_ARGUMENT"), propertyError);
 
     ServerStore store;
     InstallProgressFn progress;
@@ -367,6 +373,14 @@ Result CommandRouter::cmdServer()
         applyText(QStringLiteral("image"), &updated.image);
         applyText(QStringLiteral("level-name"), &updated.levelName);
         applyText(QStringLiteral("motd"), &updated.motd);
+        if (m_args.has(QStringLiteral("level-name"))
+            && !StringUtil::isSafeLevelName(updated.levelName))
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
+                                QStringLiteral("levelName 只允许 1-64 位字母、数字、空格、点、下划线和短横线，且不能包含 .."));
+        QString propertyError;
+        if (m_args.has(QStringLiteral("motd"))
+            && !ConfigManager::isSafePropertyPair(QStringLiteral("motd"), updated.motd, &propertyError))
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"), propertyError);
         if (m_args.has(QStringLiteral("port"))) {
             updated.port = m_args.intValue(QStringLiteral("port"), updated.port);
             changed = true;

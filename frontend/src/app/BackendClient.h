@@ -53,8 +53,6 @@ public:
                  ProgressHandler progress = ProgressHandler(),
                  int timeoutMs = 0);
 
-    Reply requestSync(const QStringList &arguments, int timeoutMs = 120000);
-
     QProcess *streamLogs(const QString &serverId, int tail, QObject *context, LineHandler onLine);
 
     int pendingCount() const { return m_active.size(); }

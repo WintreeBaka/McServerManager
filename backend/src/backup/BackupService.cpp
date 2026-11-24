@@ -134,7 +134,9 @@ QStringList BackupService::collectEntries(const ServerRecord &record, bool inclu
         if (QFileInfo::exists(QDir(record.dir).filePath(entry)))
             entries << entry;
     }
-    if (!entries.contains(record.levelName) && QFileInfo::exists(QDir(record.dir).filePath(record.levelName)))
+    if (StringUtil::isSafeLevelName(record.levelName)
+        && !entries.contains(record.levelName)
+        && QFileInfo::exists(QDir(record.dir).filePath(record.levelName)))
         entries << record.levelName;
     return entries;
 }
@@ -212,7 +214,7 @@ QStringList BackupService::gameDataEntries(const ServerRecord &record)
     const QStringList candidates = {record.levelName, QStringLiteral("world"),
                                     QStringLiteral("world_nether"), QStringLiteral("world_the_end")};
     for (const QString &candidate : candidates) {
-        if (candidate.isEmpty() || entries.contains(candidate))
+        if (!StringUtil::isSafeLevelName(candidate) || entries.contains(candidate))
             continue;
         entries << candidate;
     }

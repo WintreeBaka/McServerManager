@@ -319,40 +319,6 @@ void BackendClient::request(const QStringList &arguments,
     process->start();
 }
 
-Reply BackendClient::requestSync(const QStringList &arguments, int timeoutMs)
-{
-    Reply reply;
-    if (!isConfigured()) {
-        reply.code = QStringLiteral("BACKEND_MISSING");
-        reply.message = QStringLiteral("未找到后端程序 mcsm-cli");
-        return reply;
-    }
-
-    QProcess process;
-    process.setProgram(m_executable);
-    process.setArguments(globalFlags() + arguments);
-    process.start();
-    if (!process.waitForStarted(10000)) {
-        reply.code = QStringLiteral("BACKEND_FAILED");
-        reply.message = QStringLiteral("无法启动后端进程");
-        reply.detail = process.errorString();
-        return reply;
-    }
-    if (!process.waitForFinished(timeoutMs)) {
-        process.kill();
-        process.waitForFinished(2000);
-        reply.code = QStringLiteral("BACKEND_TIMEOUT");
-        reply.message = QStringLiteral("后端命令超时");
-        return reply;
-    }
-
-    StreamState state;
-    consumeChunk(&state, process.readAllStandardOutput(), ProgressHandler());
-    consumeChunk(&state, QByteArray("\n"), ProgressHandler());
-    const QString stderrText = QString::fromUtf8(process.readAllStandardError());
-    return buildReply(state, stderrText, process.exitCode());
-}
-
 QProcess *BackendClient::streamLogs(const QString &serverId, int tail, QObject *context, LineHandler onLine)
 {
     if (!isConfigured())

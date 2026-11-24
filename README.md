@@ -238,6 +238,8 @@ python tools/host-runtime-check.py  # 实验性「本机 JDK」模式端到端�
 .\tools\package-release.ps1 -Flavor cli           # 纯 CLI 精简版（无 Qt Widgets/Qml）
 ```
 
+Gitea 发布脚本需要显式提供 `-BaseUrl` 或环境变量 `GITEA_URL`。不要把内网仓库地址或访问令牌写进仓库。
+
 三种风味刻意使用不同名字（`…-win64`、`…-win64-with-plugins`、`…-win64-cli`），
 避免互相覆盖。自 1.1.3 起，每个 Release 同时提供 **GUI 便携版**与 **CLI 精简版**。
 

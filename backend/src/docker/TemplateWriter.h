@@ -22,8 +22,6 @@ public:
     static QString startScriptContent(const ServerRecord &record);
     static QString hostStartScriptContent(const ServerRecord &record);
     static QString hostStartScriptName();
-    static QString compressTarCommand(const QStringList &entries, const QString &outputName);
-
     static const QStringList &protectedEntries();
 };
 

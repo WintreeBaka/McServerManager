@@ -1,7 +1,6 @@
 #include "plugin/PluginHost.h"
 
 #include <QCoreApplication>
-#include <QDesktopServices>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -10,7 +9,6 @@
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QSettings>
-#include <QUrl>
 
 #include <chrono>
 #include <condition_variable>
@@ -18,6 +16,7 @@
 #include <thread>
 
 #include "app/BackendClient.h"
+#include "widgets/Common.h"
 
 namespace mcsm {
 namespace {
@@ -196,11 +195,12 @@ bool PluginApi::runAction(const QString &pageId, const QString &actionId, const 
     const auto it = m_actions.constFind(pageId.trimmed() + QLatin1Char('/') + actionId.trimmed());
     if (it == m_actions.constEnd() || it.value().isEmpty())
         return false;
+    const QVector<QJSValue> handlers = it.value();
     QVariantMap info = payload.toVariantMap();
     info.insert(QStringLiteral("pageId"), pageId);
     info.insert(QStringLiteral("action"), actionId);
     const QJSValue argument = m_engine->toScriptValue(info);
-    for (const QJSValue &handler : it.value()) {
+    for (const QJSValue &handler : handlers) {
         if (!m_host->dispatchOne(pluginId(), m_engine, handler, argument))
             return true;
     }
@@ -234,7 +234,10 @@ QJSValue PluginApi::settingsGet(const QString &key) const
 
 void PluginApi::settingsSet(const QString &key, const QJSValue &value) const
 {
-    m_host->setSettingsValue(key, value.toVariant());
+    if (!m_host->setSettingsValue(pluginId(), key, value.toVariant())) {
+        m_engine->throwError(QStringLiteral("插件只能写入 pluginData/%1/ 下的设置键")
+                                 .arg(pluginId()));
+    }
 }
 
 QJSValue PluginApi::serversList() const
@@ -307,7 +310,7 @@ QJSValue PluginApi::include(const QString &relativePath)
 
 void PluginApi::openUrl(const QString &url) const
 {
-    QDesktopServices::openUrl(QUrl(url));
+    safeOpenUrl(url);
 }
 
 QString PluginApi::humanBytes(double bytes) const
@@ -330,8 +333,9 @@ void PluginApi::dispatch(const QString &event, const QJsonObject &payload)
     const auto it = m_handlers.constFind(event.trimmed().toLower());
     if (it == m_handlers.constEnd())
         return;
+    const QVector<QJSValue> handlers = it.value();
     const QJSValue argument = m_engine->toScriptValue(payload.toVariantMap());
-    for (const QJSValue &handler : it.value()) {
+    for (const QJSValue &handler : handlers) {
         // Each handler runs behind a watchdog and a misbehaving plugin is taken
         // out of the loop instead of stalling every later event.
         if (!m_host->dispatchOne(pluginId(), m_engine, handler, argument))
@@ -679,12 +683,24 @@ QVariant PluginHost::settingsValue(const QString &key) const
     return m_settings->value(key);
 }
 
-void PluginHost::setSettingsValue(const QString &key, const QVariant &value)
+bool PluginHost::setSettingsValue(const QString &pluginId, const QString &key, const QVariant &value)
 {
     if (!m_settings)
-        return;
-    m_settings->setValue(key, value);
+        return false;
+    const QString prefix = QStringLiteral("pluginData/%1/").arg(pluginId);
+    QString normalized = key.trimmed();
+    normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    const QStringList parts = normalized.mid(prefix.size()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    const bool unsafe = !normalized.startsWith(prefix) || normalized.contains(QLatin1Char(':'))
+        || normalized.contains(QLatin1String("//")) || parts.isEmpty()
+        || parts.contains(QStringLiteral(".")) || parts.contains(QStringLiteral(".."));
+    if (pluginId.isEmpty() || unsafe) {
+        reportLog(pluginId, QStringLiteral("拒绝插件设置写入：%1").arg(key));
+        return false;
+    }
+    m_settings->setValue(normalized, value);
     m_settings->sync();
+    return true;
 }
 
 QJsonArray PluginHost::serverListJson() const

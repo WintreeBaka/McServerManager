@@ -46,6 +46,7 @@ public:
     static QMap<QString, QString> readPropertiesWithDefaults(const QString &path);
     static QString readRaw(const QString &path);
     static QString readRaw(const ServerRecord &record);
+    static bool isSafePropertyPair(const QString &key, const QString &value, QString *why = nullptr);
 
     /// Writes only the given keys, leaving every comment and unknown key intact.
     static bool applyValues(const ServerRecord &record,

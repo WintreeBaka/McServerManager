@@ -127,7 +127,7 @@ QWidget *CreateServerDialog::buildAutoPane()
     m_autoRestart->setChecked(true);
     m_autoRestart->setOnText(QStringLiteral("自动重启"), QStringLiteral("自动重启"));
     m_eula = new ToggleSwitch(gameplayCard);
-    m_eula->setChecked(true);
+    m_eula->setChecked(false);
     m_eula->setOnText(QStringLiteral("已同意"), QStringLiteral("未同意"));
 
     gameplayLayout->addRow(QStringLiteral("游戏模式"), m_gamemode);
@@ -207,7 +207,7 @@ QWidget *CreateServerDialog::buildManualPane()
     m_manualMemory->setCurrentText(QStringLiteral("4G"));
     m_manualLevel = new QLineEdit(QStringLiteral("world"), card);
     m_manualEula = new ToggleSwitch(card);
-    m_manualEula->setChecked(true);
+    m_manualEula->setChecked(false);
     m_manualEula->setOnText(QStringLiteral("已同意"), QStringLiteral("未同意"));
 
     form->addRow(QStringLiteral("服务器名称"), m_manualName);

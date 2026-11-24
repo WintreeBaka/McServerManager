@@ -222,6 +222,10 @@ QWidget *makeSectionHeader(const QString &title, const QString &subtitle = QStri
 
 QLabel *makeLabel(const QString &text, const QString &role, QWidget *parent = nullptr);
 
+/// Opens only http/https URLs. Plugin-provided links and command results must
+/// never be able to launch local files or custom protocol handlers.
+bool safeOpenUrl(const QString &url);
+
 /// Combo box that stays in sync with the shared server list and selection.
 class ServerSelector : public QComboBox
 {

@@ -214,7 +214,8 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         auto *label = new QLabel(block.value(QStringLiteral("html")).toString(), m_container);
         label->setTextFormat(Qt::RichText);
         label->setWordWrap(true);
-        label->setOpenExternalLinks(true);
+        label->setOpenExternalLinks(false);
+        connect(label, &QLabel::linkActivated, this, [](const QString &url) { safeOpenUrl(url); });
         label->setProperty("role", QStringLiteral("caption"));
         return label;
     }
@@ -482,7 +483,7 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
                             return;
                         }
                         if (!url.isEmpty()) {
-                            QDesktopServices::openUrl(QUrl(url));
+                            safeOpenUrl(url);
                             return;
                         }
                         if (!command.isEmpty())
@@ -554,7 +555,7 @@ void PluginPageView::runCommand(const QString &command, const QString &toast,
             if (!openUrlField.isEmpty()) {
                 const QString url = reply.data.value(openUrlField).toString();
                 if (!url.isEmpty())
-                    QDesktopServices::openUrl(QUrl(url));
+                    safeOpenUrl(url);
             }
         });
 }

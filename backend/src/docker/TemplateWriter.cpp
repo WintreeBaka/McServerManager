@@ -7,6 +7,7 @@
 #include <QSaveFile>
 #include <QTextStream>
 
+#include "config/ConfigManager.h"
 #include "config/ConfigSchema.h"
 #include "core/AppPaths.h"
 #include "core/Logger.h"
@@ -147,7 +148,7 @@ const QStringList &TemplateWriter::protectedEntries()
 
 QString TemplateWriter::startScriptContent(const ServerRecord &record)
 {
-    const QString jarName = record.jarName.isEmpty() ? QStringLiteral("server.jar") : record.jarName;
+    const QString jarName = safeJarName(record.jarName);
     const QString tuning = pluginNote(record);
     QString script = QStringLiteral(
                "#!/bin/sh\n"
@@ -283,14 +284,23 @@ bool TemplateWriter::writeDefaultProperties(const ServerRecord &record, bool ove
         }
         lines << QStringLiteral("%1=%2").arg(field.key, field.defaultValue);
     }
-    lines << QStringLiteral("level-name=%1").arg(record.levelName.isEmpty()
-                                                     ? QStringLiteral("world")
-                                                     : record.levelName);
+    const QString levelName = StringUtil::isSafeLevelName(record.levelName)
+                                  ? record.levelName.trimmed()
+                                  : QStringLiteral("world");
+    const QString motd = record.motd.isEmpty() ? record.name : record.motd;
+    QString unsafeReason;
+    if (!ConfigManager::isSafePropertyPair(QStringLiteral("level-name"), levelName, &unsafeReason)
+        || !ConfigManager::isSafePropertyPair(QStringLiteral("motd"), motd, &unsafeReason)) {
+        Logger::warn(QStringLiteral("template"),
+                     QStringLiteral("refused unsafe server.properties values: %1").arg(unsafeReason));
+        return false;
+    }
+    lines << QStringLiteral("level-name=%1").arg(levelName);
     lines << QStringLiteral("server-port=%1").arg(record.port);
     lines << QStringLiteral("rcon.port=%1").arg(record.rconPort);
     lines << QStringLiteral("rcon.password=%1").arg(record.rconPassword);
     lines << QStringLiteral("enable-rcon=true");
-    lines << QStringLiteral("motd=%1").arg(record.motd.isEmpty() ? record.name : record.motd);
+    lines << QStringLiteral("motd=%1").arg(motd);
     return writeLf(path, lines.join(QLatin1Char('\n')) + QLatin1Char('\n'), nullptr);
 }
 
@@ -346,17 +356,6 @@ bool TemplateWriter::writeReadme(const ServerRecord &record, QString *error)
                                      QString::number(record.port), record.image, record.memory,
                                      record.containerName());
     return writeLf(path, content, error);
-}
-
-QString TemplateWriter::compressTarCommand(const QStringList &entries, const QString &outputName)
-{
-    QStringList filtered;
-    for (const QString &entry : entries) {
-        if (entry.isEmpty())
-            continue;
-        filtered << QStringLiteral("\"%1\"").arg(entry);
-    }
-    return QStringLiteral("tar czf \"%1\" %2 2>/dev/null || true").arg(outputName, filtered.join(QLatin1Char(' ')));
 }
 
 } // namespace mcsm

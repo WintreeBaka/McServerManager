@@ -31,11 +31,6 @@ public:
                              const QByteArray &stdinData = QByteArray(),
                              const QString &workingDirectory = QString());
 
-    static QProcess *startAsync(const QString &program,
-                                const QStringList &arguments,
-                                QObject *parent = nullptr,
-                                bool mergeChannels = false);
-
     static bool startDetachedOk(const QString &program,
                                 const QStringList &arguments,
                                 const QString &workingDirectory = QString(),

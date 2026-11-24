@@ -94,19 +94,6 @@ ProcessResult ProcessRunner::run(const QString &program,
     return result;
 }
 
-QProcess *ProcessRunner::startAsync(const QString &program,
-                                    const QStringList &arguments,
-                                    QObject *parent,
-                                    bool mergeChannels)
-{
-    auto *process = new QProcess(parent);
-    process->setProgram(program);
-    process->setArguments(arguments);
-    process->setProcessChannelMode(mergeChannels ? QProcess::MergedChannels : QProcess::SeparateChannels);
-    process->start();
-    return process;
-}
-
 bool ProcessRunner::startDetachedOk(const QString &program,
                                     const QStringList &arguments,
                                     const QString &workingDirectory,

@@ -1,6 +1,7 @@
 #include "app/ThemeManager.h"
 
 #include <QApplication>
+#include <QRegularExpression>
 
 #include "app/Easing.h"
 
@@ -113,8 +114,11 @@ void ThemeManager::setAccentStyle(AccentStyle style)
 QStringList ThemeManager::fontFamilies() const
 {
     QStringList families;
-    if (!m_fontFamily.trimmed().isEmpty())
-        families << m_fontFamily.trimmed();
+    QString selected = m_fontFamily.trimmed();
+    static const QRegularExpression unsafe(QStringLiteral("[^\\p{L}\\p{N} ._()\\-]"));
+    selected.remove(unsafe);
+    if (!selected.trimmed().isEmpty())
+        families << selected.trimmed();
     const QStringList fallbacks = {QStringLiteral("HarmonyOS Sans SC"), QStringLiteral("MiSans"),
                                    QStringLiteral("Noto Sans SC"), QStringLiteral("Source Han Sans SC"),
                                    QStringLiteral("Microsoft YaHei UI"), QStringLiteral("Segoe UI")};

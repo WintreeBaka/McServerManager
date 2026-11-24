@@ -63,6 +63,9 @@ public:
 
     QString dataHome() const;
     void setDataHome(const QString &home);
+    /// Sets the backend executable. A custom path is persisted only when the
+    /// user explicitly chose it from Settings.
+    void setBackendExecutable(const QString &path, bool userConfirmed);
 
     /// Refreshes the server list from the backend.
     void refreshServers(std::function<void(bool ok, const QString &message)> done = {});
@@ -132,6 +135,7 @@ private:
     quint64 m_serverListSeq = 0;
     bool m_pollInFlight = false;
     int m_pollTicks = 0;
+    bool m_backendExecutableConfirmed = false;
     bool m_experimental = false;
     bool m_bootstrapped = false;
     bool m_suppressSave = false;

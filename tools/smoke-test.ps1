@@ -124,6 +124,43 @@ New-Item -ItemType Directory -Path $assets -Force | Out-Null
 $fakeJar = Join-Path $assets "fake-server.jar"
 [System.IO.File]::WriteAllBytes($fakeJar, (New-Object byte[] 8192))
 
+$badLevel = Invoke-Cli @(
+    "install", "--name", "bad level", "--type", "paper", "--manual", "true",
+    "--jar", $fakeJar, "--image", "eclipse-temurin:17-jre", "--port", "25597",
+    "--level-name", "../escape", "--skip-docker"
+) -AllowFailure
+Write-Result "levelName traversal rejected" `
+    ((-not $badLevel.ok) -and $badLevel.error.code -eq "INVALID_ARGUMENT") `
+    ("code=" + $badLevel.error.code)
+
+$newlineMotd = "safe`nunsafe"
+$badMotd = Invoke-Cli @(
+    "install", "--name", "bad motd", "--type", "paper", "--manual", "true",
+    "--jar", $fakeJar, "--image", "eclipse-temurin:17-jre", "--port", "25597",
+    "--motd", $newlineMotd, "--skip-docker"
+) -AllowFailure
+Write-Result "motd newline rejected" `
+    ((-not $badMotd.ok) -and $badMotd.error.code -eq "INVALID_ARGUMENT") `
+    ("code=" + $badMotd.error.code)
+
+$defaultEula = Invoke-Cli @(
+    "install", "--name", "smoke eula default", "--id", "smoke-eula-default",
+    "--type", "paper", "--manual", "true", "--jar", $fakeJar,
+    "--image", "eclipse-temurin:17-jre", "--port", "25598",
+    "--level-name", "world", "--skip-docker"
+)
+$defaultEulaDir = Join-Path $DataRoot "servers\smoke-eula-default"
+$defaultEulaText = if (Test-Path (Join-Path $defaultEulaDir "eula.txt")) {
+    Get-Content (Join-Path $defaultEulaDir "eula.txt") -Raw
+} else {
+    ""
+}
+Write-Result "EULA defaults to false" ($defaultEula.ok -and $defaultEulaText -match '(?m)^eula=false$') `
+    ("eula.txt=" + $defaultEulaText.Trim())
+if ($defaultEula.ok) {
+    Invoke-Cli @("server", "delete", "--id", "smoke-eula-default") | Out-Null
+}
+
 $install = Invoke-Cli @(
     "install",
     "--name", "smoke server",
@@ -158,6 +195,20 @@ $detail = Invoke-Cli @("server", "get", "--id", $serverId)
 # honest answer is "unknown" (never "stopped" - see audit M5).
 Write-Result "server get" `
     ($detail.ok -and ($detail.data.status -in @("stopped", "unknown"))) $detail.error.message
+
+$badUpdateLevel = Invoke-Cli @(
+    "server", "update", "--id", $serverId, "--level-name", "../escape"
+) -AllowFailure
+Write-Result "server update levelName traversal rejected" `
+    ((-not $badUpdateLevel.ok) -and $badUpdateLevel.error.code -eq "INVALID_ARGUMENT") `
+    ("code=" + $badUpdateLevel.error.code)
+
+$badUpdateMotd = Invoke-Cli @(
+    "server", "update", "--id", $serverId, "--motd", $newlineMotd
+) -AllowFailure
+Write-Result "server update motd newline rejected" `
+    ((-not $badUpdateMotd.ok) -and $badUpdateMotd.error.code -eq "INVALID_ARGUMENT") `
+    ("code=" + $badUpdateMotd.error.code)
 
 # ----------------------------------------------------------------- config ----
 Write-Host ""

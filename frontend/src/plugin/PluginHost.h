@@ -144,7 +144,7 @@ public:
     void removeStorageValue(const QString &pluginId, const QString &key);
     QStringList storageKeys(const QString &pluginId) const;
     QVariant settingsValue(const QString &key) const;
-    void setSettingsValue(const QString &key, const QVariant &value);
+    bool setSettingsValue(const QString &pluginId, const QString &key, const QVariant &value);
     QJsonArray serverListJson() const;
     QString selectedServerId() const;
     void setSelectedServerId(const QString &id) { m_selectedId = id; }

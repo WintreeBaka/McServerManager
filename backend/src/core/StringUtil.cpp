@@ -93,13 +93,19 @@ QString StringUtil::ellipsize(const QString &text, int maxChars)
     return text.left(qMax(0, maxChars - 1)) + QChar(0x2026);
 }
 
+bool StringUtil::isSafeLevelName(const QString &value)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9_. -]{1,64}$"));
+    return pattern.match(value).hasMatch() && !value.contains(QLatin1String(".."));
+}
+
 QString StringUtil::randomToken(int length)
 {
     static const QString alphabet = QStringLiteral("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
     QString out;
     out.reserve(length);
     for (int i = 0; i < length; ++i)
-        out.append(alphabet.at(QRandomGenerator::global()->bounded(alphabet.size())));
+        out.append(alphabet.at(QRandomGenerator::system()->bounded(alphabet.size())));
     return out;
 }
 

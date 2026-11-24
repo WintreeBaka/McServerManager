@@ -252,7 +252,7 @@ my-plugin-1.0.0.zip
 ```js
 mcsm.log("写入管理器日志");
 mcsm.toast("存档完成", "success");     // level: info | success | warn | error
-mcsm.openUrl("https://example.com");   // 用系统浏览器打开
+mcsm.openUrl("https://example.com");   // 仅允许 http/https，用系统浏览器打开
 mcsm.utils.humanBytes(1536);           // -> "1.5 KB"
 ```
 
@@ -291,7 +291,7 @@ mcsm.ui.openPage(pageId);   // 让管理器跳转到该页面
 
 1. `command`：执行一条 mcsm-cli 命令（例如 `"server list"`、`"plugin call --name x --method y"`），
    结果写入同页面的 `log` 区块；
-2. `url`：直接用浏览器打开；
+2. `url`：仅允许 http/https，直接用浏览器打开；
 3. `openUrlFrom: "url"`：先执行 `command`，再从返回数据里取该字段作为 URL 打开
    （例如 `plugin service start` 返回的 `url`）。
 4. `action: "名字"`：不执行命令，改为调用脚本里通过 `mcsm.ui.onAction` 绑定的回调
@@ -405,7 +405,7 @@ mcsm.storage.keys();
 mcsm.storage.remove("lastRun");
 
 mcsm.settings.get("ui/theme");             // 读取管理器设置
-mcsm.settings.set("myPlugin/flag", true);
+mcsm.settings.set("pluginData/com.example.demo/flag", true); // 只能写自身数据前缀
 ```
 
 ### 5.8 多文件
@@ -619,6 +619,9 @@ Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(resu
 ## 8. 权限、安全与隔离
 
 插件是**受信任扩展**，不是沙箱。安装第三方插件前请确认来源。
+
+> **重要：安装插件等于授予其完整本机权限。** `permissions` 只用于向用户说明插件能力，
+> 当前版本不会据此限制文件、进程、网络或其他系统访问。
 
 | `permissions` 建议值 | 含义 |
 | --- | --- |

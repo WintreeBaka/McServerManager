@@ -369,7 +369,7 @@ void PluginExtensionsPage::openPanel(const QJsonObject &plugin)
                 const QString url = reply.data.value(QStringLiteral("url")).toString();
                 if (!url.isEmpty()) {
                     setStatus(QStringLiteral("✔ %1 面板已启动：%2").arg(id, url));
-                    QDesktopServices::openUrl(QUrl(url));
+                    safeOpenUrl(url);
                 } else {
                     setStatus(QStringLiteral("插件服务已启动，但未声明端口（web.port）"));
                 }

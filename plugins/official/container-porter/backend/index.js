@@ -44,6 +44,8 @@ const BUNDLE_FORMAT = "mcsm-container-porter/1";
 const PLUGIN_VERSION = process.env.MCSM_PLUGIN_VERSION || MANIFEST.version || "0.0.0";
 const TAR = process.platform === "win32" ? "tar.exe" : "tar";
 const DOCKER_TIMEOUT = 30 * 60 * 1000;
+const MAX_BUNDLE_BYTES = 8 * 1024 * 1024 * 1024;
+const MAX_EXTRACTED_BYTES = 32 * 1024 * 1024 * 1024;
 
 function reply(object) {
     process.stdout.write(JSON.stringify(object) + "\n");
@@ -101,6 +103,101 @@ function run(cmd, args, options) {
         err: (result.stderr || "").trim(),
         error: result.error ? String(result.error.message) : ""
     };
+}
+
+function isInside(root, candidate) {
+    const relative = path.relative(root, candidate);
+    return relative === "" || (!relative.startsWith(".." + path.sep)
+        && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function isSafeMemberName(name) {
+    const normalized = String(name || "").trim().replace(/\\/g, "/");
+    if (!normalized || normalized === ".") return true;
+    if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) return false;
+    return !normalized.split("/").some((part) => part === "..");
+}
+
+function verboseEntrySize(line) {
+    const tokens = line.trim().split(/\s+/);
+    for (let i = 2; i < tokens.length; ++i) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(tokens[i])
+            || /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/i.test(tokens[i])
+            || /^\d{1,2}月$/.test(tokens[i])) {
+            const size = Number(tokens[i - 1]);
+            if (Number.isFinite(size) && size >= 0) return size;
+        }
+    }
+    const fallbackIndex = tokens[1] && tokens[1].includes("/") ? 2 : 3;
+    const fallback = Number(tokens[fallbackIndex]);
+    if (Number.isFinite(fallback) && fallback >= 0) return fallback;
+    return null;
+}
+
+/// Reject traversal and link members before tar is allowed to write anything.
+/// The verbose listing also gives us an uncompressed-size estimate for quota.
+function auditTar(file, label, maxBytes) {
+    let stat;
+    try {
+        stat = fs.statSync(file);
+    } catch (error) {
+        return fail("FILE_NOT_FOUND", "找不到" + label, String(error.message || error));
+    }
+    if (stat.size > MAX_BUNDLE_BYTES) {
+        return fail("IMPORT_QUOTA", label + "超过导入大小上限",
+            Math.round(stat.size) + " > " + MAX_BUNDLE_BYTES);
+    }
+
+    const names = run(TAR, ["-tf", file], { timeout: DOCKER_TIMEOUT });
+    if (!names.ok) return fail("BUNDLE_INVALID", "无法读取" + label + "成员列表", names.err || names.error);
+    for (const name of names.out.split(/\r?\n/)) {
+        if (!isSafeMemberName(name)) {
+            return fail("BUNDLE_UNSAFE", label + "包含越界路径", name);
+        }
+    }
+
+    const verbose = run(TAR, ["-tvf", file], { timeout: DOCKER_TIMEOUT });
+    if (!verbose.ok) return fail("BUNDLE_INVALID", "无法审计" + label + "成员类型", verbose.err || verbose.error);
+    let total = 0;
+    for (const line of verbose.out.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith("l") || trimmed.startsWith("h") || /\blink to\b/i.test(trimmed)) {
+            return fail("BUNDLE_UNSAFE", label + "包含符号链接或硬链接", trimmed);
+        }
+        if (trimmed.startsWith("-")) {
+            const size = verboseEntrySize(trimmed);
+            if (size === null) {
+                return fail("BUNDLE_INVALID", "无法估算" + label + "解压大小", trimmed);
+            }
+            total += size;
+            if (total > maxBytes) {
+                return fail("IMPORT_QUOTA", label + "预估解压总量超过上限",
+                    total + " > " + maxBytes);
+            }
+        }
+    }
+    return ok({ estimatedBytes: total });
+}
+
+function assertRealPathsInside(root) {
+    const canonicalRoot = fs.realpathSync(root);
+    const pending = [canonicalRoot];
+    while (pending.length) {
+        const dir = pending.pop();
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            const info = fs.lstatSync(full);
+            if (info.isSymbolicLink()) {
+                throw new Error("解压结果包含符号链接：" + full);
+            }
+            const real = fs.realpathSync(full);
+            if (!isInside(canonicalRoot, real)) {
+                throw new Error("解压结果越出目标目录：" + full);
+            }
+            if (info.isDirectory()) pending.push(real);
+        }
+    }
 }
 
 function docker(args, options) {
@@ -346,11 +443,22 @@ function importContainer(request, file) {
     const work = path.join(root, "tmp", "porter-import-" + stamp() + "-" + process.pid);
     fs.mkdirSync(work, { recursive: true });
 
+    const outerAudit = auditTar(file, "容器包", MAX_BUNDLE_BYTES);
+    if (!outerAudit.ok) {
+        cleanup(work);
+        return outerAudit;
+    }
     progress("解开容器包 …");
     const unpack = run(TAR, ["-xf", file, "-C", work], { timeout: DOCKER_TIMEOUT });
     if (!unpack.ok) {
         cleanup(work);
         return fail("BUNDLE_INVALID", "无法解开容器包", unpack.err || unpack.error);
+    }
+    try {
+        assertRealPathsInside(work);
+    } catch (error) {
+        cleanup(work);
+        return fail("BUNDLE_UNSAFE", "容器包解压结果越界", String(error.message || error));
     }
 
     let manifest;
@@ -409,11 +517,23 @@ function importContainer(request, file) {
         cleanup(work);
         return fail("BUNDLE_INVALID", "容器包里没有 data.tar");
     }
+    const dataAudit = auditTar(dataTar, "服务器数据包", MAX_EXTRACTED_BYTES);
+    if (!dataAudit.ok) {
+        cleanup(work);
+        return dataAudit;
+    }
     const extracted = run(TAR, ["-xf", dataTar, "-C", targetDir], { timeout: DOCKER_TIMEOUT });
     if (!extracted.ok) {
         cleanup(targetDir);
         cleanup(work);
         return fail("EXTRACT_FAILED", "解压服务器数据失败", extracted.err || extracted.error);
+    }
+    try {
+        assertRealPathsInside(targetDir);
+    } catch (error) {
+        cleanup(targetDir);
+        cleanup(work);
+        return fail("BUNDLE_UNSAFE", "服务器数据解压结果越界", String(error.message || error));
     }
 
     // 端口可能因为冲突被换掉，server.properties 必须跟记录保持一致

@@ -87,7 +87,7 @@ void AppContext::bootstrap()
 }
 
 /// Asks the backend for its data root once (used by the "关于" card and the
-/// plugin page). Deliberately asynchronous: requestSync would freeze the UI.
+/// plugin page). Deliberately asynchronous so it cannot freeze the UI.
 void AppContext::resolveDataHome()
 {
     if (!m_backend->isConfigured() || !m_dataHomeCache.isEmpty())
@@ -132,9 +132,12 @@ void AppContext::loadSettings()
     // stored path is only a fallback for custom setups.
     const QString sibling = BackendClient::siblingBackend();
     const QString backendPath = m_settings->value(QStringLiteral("backend/executable")).toString();
+    m_backendExecutableConfirmed =
+        m_settings->value(QStringLiteral("backend/executableConfirmed"), false).toBool();
     if (!sibling.isEmpty()) {
         m_backend->setExecutable(sibling);
-    } else if (!backendPath.isEmpty() && QFileInfo::exists(backendPath)) {
+        m_backendExecutableConfirmed = false;
+    } else if (m_backendExecutableConfirmed && !backendPath.isEmpty() && QFileInfo::exists(backendPath)) {
         m_backend->setExecutable(backendPath);
     } else {
         // stored path is stale (app was moved): fall back to the auto-detected one
@@ -157,8 +160,16 @@ void AppContext::saveSettings()
     m_settings->setValue(QStringLiteral("ui/fontFamily"), ThemeManager::instance()->fontFamily());
     m_settings->setValue(QStringLiteral("ui/experimental"), m_experimental);
     m_settings->setValue(QStringLiteral("backend/executable"), m_backend->executable());
+    m_settings->setValue(QStringLiteral("backend/executableConfirmed"), m_backendExecutableConfirmed);
     m_settings->setValue(QStringLiteral("backend/home"), m_backend->dataHome());
     m_settings->sync();
+}
+
+void AppContext::setBackendExecutable(const QString &path, bool userConfirmed)
+{
+    m_backendExecutableConfirmed = userConfirmed;
+    m_backend->setExecutable(path);
+    saveSettings();
 }
 
 void AppContext::applyTheme()

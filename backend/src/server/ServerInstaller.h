@@ -29,7 +29,7 @@ struct InstallRequest
     int javaMajor = 0;         // 0 = auto detect from minecraft version
     QString image;             // optional explicit docker image
     QString javaOptions;
-    bool acceptEula = true;
+    bool acceptEula = false;
     bool manual = false;       // user supplied jar
     bool skipDocker = false;
     bool autoRestart = true;

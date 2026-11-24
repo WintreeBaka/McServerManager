@@ -35,6 +35,14 @@ PluginImportDialog::PluginImportDialog(QWidget *parent)
 
     root->addWidget(buildSourcePane());
 
+    auto *permissionNotice = makeLabel(
+        QStringLiteral("⚠ 安全提示：安装插件等于授予其完整本机权限。plugin.json 中的 permissions "
+                       "仅用于说明，不会限制插件实际能力。"),
+        QStringLiteral("hint"), this);
+    permissionNotice->setWordWrap(true);
+    permissionNotice->setStyleSheet(QStringLiteral("font-weight: 600;"));
+    root->addWidget(permissionNotice);
+
     m_status = makeLabel(QStringLiteral("选择来源后点击「校验并导入」"), QStringLiteral("hint"), this);
     root->addWidget(m_status);
 
@@ -137,7 +145,7 @@ QWidget *PluginImportDialog::buildUrlPane()
     m_url->setPlaceholderText(QStringLiteral("https://example.com/plugins/my-plugin-1.0.0.zip"));
     layout->addWidget(m_url);
     layout->addWidget(makeLabel(
-        QStringLiteral("支持 http / https 直链；下载完成后会用内置 7-Zip 解压并校验 plugin.json。"),
+        QStringLiteral("仅支持 https 直链；下载完成后会用内置 7-Zip 解压并校验 plugin.json。"),
         QStringLiteral("hint"), pane));
     return pane;
 }
@@ -195,8 +203,8 @@ void PluginImportDialog::startImport()
                                       : QStringLiteral("请先选择本地插件包"));
         return;
     }
-    if (isUrlMode() && !source.startsWith(QLatin1String("http"), Qt::CaseInsensitive)) {
-        m_status->setText(QStringLiteral("URL 必须以 http:// 或 https:// 开头"));
+    if (isUrlMode() && !source.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
+        m_status->setText(QStringLiteral("URL 必须以 https:// 开头"));
         return;
     }
     if (!isUrlMode() && !QFileInfo::exists(source)) {

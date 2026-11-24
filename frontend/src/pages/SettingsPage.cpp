@@ -618,11 +618,11 @@ QWidget *SettingsPage::buildBackendCard()
             return;
         }
         m_backendPath->setText(found);
-        AppContext::instance()->backend()->setExecutable(found);
+        AppContext::instance()->setBackendExecutable(found, false);
         m_backendStatus->setText(QStringLiteral("✔ 已使用 %1").arg(found));
     });
     connect(applyBackend, &QPushButton::clicked, this, [this]() {
-        AppContext::instance()->backend()->setExecutable(m_backendPath->text().trimmed());
+        AppContext::instance()->setBackendExecutable(m_backendPath->text().trimmed(), true);
         AppContext::instance()->logActivity(QStringLiteral("后端路径已更新"), QStringLiteral("info"));
     });
     connect(applyHome, &QPushButton::clicked, this, [this]() {
@@ -715,7 +715,7 @@ void SettingsPage::browseBackend()
     if (path.isEmpty())
         return;
     m_backendPath->setText(path);
-    AppContext::instance()->backend()->setExecutable(path);
+    AppContext::instance()->setBackendExecutable(path, true);
     m_backendStatus->setText(QStringLiteral("✔ 已使用 %1").arg(path));
     detectEnvironment();
 }
