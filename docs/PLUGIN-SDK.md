@@ -608,6 +608,9 @@ Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(resu
 | `MCSM_PLUGIN_DIR` | 插件安装目录 |
 | `MCSM_PLUGIN_DATA` | 插件数据目录（可写） |
 | `MCSM_PLUGIN_PORT` | 声明的端口（若 `web.port` 存在） |
+| `MCSM_BACKEND` | 当前管理器后端 `mcsm-cli` 的绝对路径，供受控命令调用 |
+| `MCSM_HOME` | 当前管理器数据目录 |
+| `MCSM_MANAGER_VERSION` | 当前管理器版本 |
 
 界面上的「打开面板」按钮会先 `service start`，再从返回的 `url` 打开浏览器；
 若插件只提供静态 `web.entry` 而没有 `service`，则直接用浏览器打开该 HTML 文件。
@@ -622,6 +625,9 @@ Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(resu
 
 > **重要：安装插件等于授予其完整本机权限。** `permissions` 只用于向用户说明插件能力，
 > 当前版本不会据此限制文件、进程、网络或其他系统访问。
+> 插件钩子中的服务器对象不包含 RCON 密码；需要执行控制台命令时，请通过
+> `MCSM_BACKEND --home <MCSM_HOME> server command --id ... --command ...`
+> 使用受控通道。
 
 | `permissions` 建议值 | 含义 |
 | --- | --- |

@@ -18,6 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify bundled third-party binaries
+        shell: pwsh
+        run: ./tools/verify-third-party.ps1
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:

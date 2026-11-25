@@ -19,7 +19,9 @@
  *   image.tar       可选，docker save 出来的容器镜像
  */
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 const readline = require("readline");
 
@@ -65,6 +67,63 @@ function fail(code, message, detail) {
 
 function nowIso() {
     return new Date().toISOString();
+}
+
+function encodeToken(value) {
+    return encodeURIComponent(String(value === undefined || value === null ? "" : value))
+        .replace(/~/g, "%7E");
+}
+
+function decodeToken(value) {
+    try {
+        return decodeURIComponent(String(value === undefined || value === null ? "" : value));
+    } catch (error) {
+        return null;
+    }
+}
+
+function sourceIdentity(request) {
+    const dataDir = request && request.dataDir;
+    if (!dataDir) return "";
+    const file = path.join(dataDir, "source-id");
+    try {
+        const existing = fs.readFileSync(file, "utf8").trim();
+        if (/^[a-f0-9]{32,64}$/i.test(existing)) return existing;
+    } catch (error) {
+        // 首次导出时生成
+    }
+    const created = crypto.randomBytes(16).toString("hex");
+    try {
+        fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(file, created + "\n", "utf8");
+    } catch (error) {
+        // 无法持久化时仍然在本次进程里使用一个临时标识
+    }
+    return created;
+}
+
+const cleanedRoots = new Set();
+function cleanupStaleTemps(request) {
+    const root = dataRootOf(request);
+    if (!root || cleanedRoots.has(root)) return;
+    cleanedRoots.add(root);
+    const dir = path.join(root, "tmp");
+    let entries = [];
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return;
+    }
+    const cutoff = Date.now() - 6 * 60 * 60 * 1000;
+    for (const entry of entries) {
+        if (!entry.isDirectory() || !/^porter-/.test(entry.name)) continue;
+        const full = path.join(dir, entry.name);
+        try {
+            if (fs.statSync(full).mtimeMs < cutoff) cleanup(full);
+        } catch (error) {
+            // 并发进程可能已经清理
+        }
+    }
 }
 
 function stamp() {
@@ -253,14 +312,90 @@ function writeStore(root, data) {
 }
 
 function sanitizeRecord(record) {
-    const copy = Object.assign({}, record);
-    // 这些字段只在原来那台机器上有意义，导入时会重新计算
+    const copy = {};
+    const fields = ["name", "type", "mcVersion", "build", "jarName", "image", "runtime",
+        "memory", "memoryLimit", "port", "rconPort", "motd", "levelName",
+        "eulaAccepted", "autoRestart", "autoStart", "manualInstall"];
+    for (const field of fields) {
+        if (Object.prototype.hasOwnProperty.call(record || {}, field)) copy[field] = record[field];
+    }
+    // 容器包默认不带凭据和本机路径。
+    delete copy.rconPassword;
+    delete copy.jdkHome;
+    delete copy.extraJavaOptions;
     delete copy.dir;
     delete copy.status;
     delete copy.lastError;
     delete copy.lastStartAt;
     delete copy.lastBackupAt;
     return copy;
+}
+
+function safeImportedServer(base, id, name, ports, rconPassword) {
+    const source = base && typeof base === "object" ? base : {};
+    const text = (value, max) => String(value === undefined || value === null ? "" : value)
+        .replace(/[\r\n\u0000]+/g, " ").trim().slice(0, max);
+    const type = ["vanilla", "paper", "purpur", "fabric"].indexOf(String(source.type)) >= 0
+        ? String(source.type) : "paper";
+    const runtime = source.runtime === "host" ? "host" : "docker";
+    const memory = /^[0-9]{1,5}[MG]$/i.test(String(source.memory || ""))
+        ? String(source.memory).toUpperCase() : "4G";
+    const memoryLimit = /^[0-9]{1,5}[mMgG]$/.test(String(source.memoryLimit || ""))
+        ? String(source.memoryLimit) : "";
+    const image = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,255}$/.test(String(source.image || ""))
+        ? String(source.image) : "eclipse-temurin:17-jre";
+    return {
+        id: id,
+        name: name,
+        type: type,
+        mcVersion: text(source.mcVersion, 64),
+        build: text(source.build, 64),
+        jarName: text(source.jarName || "server.jar", 128),
+        image: image,
+        runtime: runtime,
+        memory: memory,
+        memoryLimit: memoryLimit,
+        port: ports.port,
+        rconPort: ports.rconPort,
+        rconPassword: rconPassword,
+        motd: text(source.motd, 256),
+        levelName: text(source.levelName || "world", 64) || "world",
+        eulaAccepted: false,
+        autoRestart: source.autoRestart === true,
+        autoStart: false,
+        manualInstall: false
+    };
+}
+
+function redactServerProperties(content) {
+    const lines = String(content || "").split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+        if (/^\s*rcon\.password\s*=/.test(lines[i])) {
+            lines[i] = "rcon.password=__MCSM_PORTER_REDACTED__";
+        }
+    }
+    return lines.join("\n");
+}
+
+function redactPropertiesTree(dir) {
+    let entries = [];
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return;
+    }
+    for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            redactPropertiesTree(full);
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".properties")) {
+            try {
+                fs.writeFileSync(full, redactServerProperties(fs.readFileSync(full, "utf8")), "utf8");
+            } catch (error) {
+                // 单文件失败会在后续打包时报错
+            }
+        }
+    }
 }
 
 function setProperty(content, key, value) {
@@ -341,6 +476,7 @@ function exportContainer(request, serverId, mode, target, asFile) {
     fs.mkdirSync(path.join(root, "tmp"), { recursive: true });
     const work = path.join(root, "tmp", "porter-" + stamp() + "-" + process.pid);
     fs.mkdirSync(work, { recursive: true });
+    const sourceId = sourceIdentity(request);
 
     const withImage = mode === 1 || mode === 2;
     const withBackups = mode === 2;
@@ -380,11 +516,45 @@ function exportContainer(request, serverId, mode, target, asFile) {
         tarArgs.push("--exclude", "backups", "--exclude", "logs");
         excluded.push("backups", "logs");
     }
+    const originalProperties = path.join(serverDir, "server.properties");
+    const sanitizedProperties = path.join(work, "server.properties");
+    const originalConfigBackups = path.join(serverDir, "config-backups");
+    const sanitizedConfigBackups = path.join(work, "config-backups");
+    let propertiesRedacted = false;
+    if (fs.existsSync(originalProperties)) {
+        fs.writeFileSync(sanitizedProperties,
+            redactServerProperties(fs.readFileSync(originalProperties, "utf8")), "utf8");
+        tarArgs.push("--exclude", "./server.properties");
+        propertiesRedacted = true;
+    }
+    let backupsRedacted = false;
+    if (fs.existsSync(originalConfigBackups)) {
+        fs.cpSync(originalConfigBackups, sanitizedConfigBackups, { recursive: true });
+        redactPropertiesTree(sanitizedConfigBackups);
+        tarArgs.push("--exclude", "./config-backups");
+        backupsRedacted = true;
+    }
     tarArgs.push(".");
     const packed = run(TAR, tarArgs, { timeout: DOCKER_TIMEOUT });
     if (!packed.ok) {
         cleanup(work);
         return fail("DATA_PACK_FAILED", "打包服务器目录失败", packed.err || packed.error);
+    }
+    if (propertiesRedacted) {
+        const appended = run(TAR, ["-rf", dataTar, "-C", work, "server.properties"],
+            { timeout: DOCKER_TIMEOUT });
+        if (!appended.ok) {
+            cleanup(work);
+            return fail("DATA_PACK_FAILED", "写入脱敏配置失败", appended.err || appended.error);
+        }
+    }
+    if (backupsRedacted) {
+        const appended = run(TAR, ["-rf", dataTar, "-C", work, "config-backups"],
+            { timeout: DOCKER_TIMEOUT });
+        if (!appended.ok) {
+            cleanup(work);
+            return fail("DATA_PACK_FAILED", "写入脱敏配置快照失败", appended.err || appended.error);
+        }
     }
 
     const manifest = {
@@ -392,7 +562,14 @@ function exportContainer(request, serverId, mode, target, asFile) {
         createdAt: nowIso(),
         manager: (request && request.managerVersion) || "",
         plugin: { id: PLUGIN_ID, version: PLUGIN_VERSION },
+        source: {
+            manager: "McServerManager",
+            instanceId: sourceId,
+            hostname: os.hostname(),
+            exportedAt: nowIso()
+        },
         image: { ref: imageRef, packaged: packagedImage },
+        credentials: { redacted: propertiesRedacted || backupsRedacted },
         data: { excluded: excluded, bytes: fs.statSync(dataTar).size },
         server: sanitizeRecord(record)
     };
@@ -434,7 +611,8 @@ function exportContainer(request, serverId, mode, target, asFile) {
 
 // ------------------------------------------------------------------ 导入 ---
 
-function importContainer(request, file) {
+function importContainer(request, file, flags) {
+    const allow = flags || {};
     const root = dataRootOf(request);
     if (!root) return fail("NO_DATA_ROOT", "无法定位管理器数据目录");
     if (!file || !fs.existsSync(file)) return fail("FILE_NOT_FOUND", "找不到容器包", String(file || ""));
@@ -473,11 +651,20 @@ function importContainer(request, file) {
         return fail("BUNDLE_FORMAT", "这不是「容器搬运工」导出的容器包");
     }
     const base = manifest.server || {};
+    const localSource = sourceIdentity(request);
+    const packageSource = manifest.source && typeof manifest.source.instanceId === "string"
+        ? manifest.source.instanceId : "";
+    const trustedSource = !!localSource && packageSource === localSource;
 
     let imageRef = (manifest.image && manifest.image.ref) || "";
     let packagedImage = false;
     const imageTar = path.join(work, "image.tar");
     if (fs.existsSync(imageTar)) {
+        if (!trustedSource && !allow.allowUntrustedImage) {
+            cleanup(work);
+            return fail("IMPORT_CONFIRM_REQUIRED",
+                "镜像不是由本机导出的，载入前需要明确确认。", "image");
+        }
         progress("载入容器镜像 …");
         const loaded = docker(["load", "-i", imageTar], { timeout: DOCKER_TIMEOUT });
         if (!loaded.ok) {
@@ -487,6 +674,11 @@ function importContainer(request, file) {
         const match = (loaded.out + "\n" + loaded.err).match(/Loaded image:?\s*(\S+)/i);
         if (match) imageRef = match[1];
         packagedImage = true;
+    }
+    if (base.runtime === "host" && !allow.allowHost) {
+        cleanup(work);
+        return fail("IMPORT_CONFIRM_REQUIRED",
+            "该包声明使用本机 JDK 运行，导入前需要管理员显式确认。", "host");
     }
 
     const store = readStore(root);
@@ -536,36 +728,27 @@ function importContainer(request, file) {
         return fail("BUNDLE_UNSAFE", "服务器数据解压结果越界", String(error.message || error));
     }
 
-    // 端口可能因为冲突被换掉，server.properties 必须跟记录保持一致
+    const importedPassword = crypto.randomBytes(18).toString("base64")
+        .replace(/[^A-Za-z0-9]/g, "").slice(0, 20);
+    // 导出包不携带原 RCON 密码；导入时始终生成新密码并写回配置。
     const propertiesFile = path.join(targetDir, "server.properties");
-    if (fs.existsSync(propertiesFile) && (Number(base.port) !== ports.port || Number(base.rconPort) !== ports.rconPort)) {
-        let content = fs.readFileSync(propertiesFile, "utf8");
-        content = setProperty(content, "server-port", String(ports.port));
-        content = setProperty(content, "rcon.port", String(ports.rconPort));
-        if (base.rconPassword) content = setProperty(content, "rcon.password", String(base.rconPassword));
-        content = setProperty(content, "enable-rcon", "true");
-        fs.writeFileSync(propertiesFile, content, "utf8");
-    }
+    let content = fs.existsSync(propertiesFile) ? fs.readFileSync(propertiesFile, "utf8") : "";
+    content = setProperty(content, "server-port", String(ports.port));
+    content = setProperty(content, "rcon.port", String(ports.rconPort));
+    content = setProperty(content, "rcon.password", importedPassword);
+    content = setProperty(content, "enable-rcon", "true");
+    fs.writeFileSync(propertiesFile, content, "utf8");
 
-    const record = Object.assign({}, base, {
-        id: id,
-        name: name,
-        dir: targetDir,
-        port: ports.port,
-        rconPort: ports.rconPort,
-        status: "stopped",
-        lastError: "",
-        lastStartAt: "",
-        lastBackupAt: "",
-        createdAt: nowIso()
-    });
+    const record = safeImportedServer(base, id, name, ports, importedPassword);
+    record.dir = targetDir;
+    record.status = "stopped";
+    record.createdAt = nowIso();
     if (record.runtime === "host") {
         record.jdkHome = path.join(targetDir, "jdk");
     } else {
         record.runtime = "docker";
         if (imageRef) record.image = imageRef;
     }
-    if (!record.rconPassword && base.rconPassword) record.rconPassword = base.rconPassword;
 
     servers.push(record);
     try {
@@ -655,6 +838,7 @@ function openFolder(request) {
 // ------------------------------------------------------------------ 入口 ---
 
 function handle(request) {
+    cleanupStaleTemps(request);
     const method = String((request && request.method) || "");
 
     if (method === "info" || method === "describe") {
@@ -679,10 +863,13 @@ function handle(request) {
         const parts = method.split("~");
         // export~<id,id,...>~<0|1|2>~<encodeURIComponent(目标文件或目录)>
         const ids = String(parts[1] || "").split(",")
-            .map((id) => decodeURIComponent(id).trim())
+            .map((id) => decodeToken(id))
+            .filter((id) => id !== null)
+            .map((id) => id.trim())
             .filter((id) => id.length > 0);
         const mode = Number(parts[2] || 0);
-        const target = parts.length > 3 ? decodeURIComponent(parts.slice(3).join("~")) : "";
+        const target = parts.length > 3 ? decodeToken(parts.slice(3).join("~")) : "";
+        if (target === null) return fail("INVALID_ARGUMENT", "导出目标路径编码无效");
         if (!ids.length) return fail("INVALID_ARGUMENT", "export 缺少服务器 id");
         const files = [];
         for (const serverId of ids) {
@@ -695,9 +882,17 @@ function handle(request) {
         return ok({ files: files, count: files.length, totalBytes: totalBytes, mode: mode });
     }
     if (method.indexOf("import~") === 0) {
-        const file = decodeURIComponent(method.slice("import~".length));
+        const parts = method.split("~");
+        const file = decodeToken(parts[1] || "");
+        if (file === null) return fail("INVALID_ARGUMENT", "导入路径编码无效");
         if (!file) return fail("INVALID_ARGUMENT", "import 缺少文件路径");
-        return importContainer(request, file);
+        const flags = {};
+        for (const pair of String(parts[2] || "").split("&")) {
+            const split = pair.split("=");
+            if (split[0] === "allowHost") flags.allowHost = split[1] === "1";
+            if (split[0] === "allowUntrustedImage") flags.allowUntrustedImage = split[1] === "1";
+        }
+        return importContainer(request, file, flags);
     }
     return fail("METHOD_NOT_FOUND", "未实现的方法：" + method);
 }
@@ -714,7 +909,8 @@ rl.on("line", (line) => {
     try {
         result = handle(request);
     } catch (error) {
-        result = fail("INTERNAL_ERROR", "插件内部错误", String((error && error.stack) || error));
+        console.error(error && error.stack ? error.stack : error);
+        result = fail("INTERNAL_ERROR", "插件内部错误", "详见管理器日志");
     }
     reply(result);
 });

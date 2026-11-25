@@ -1,9 +1,9 @@
 {
   "id": "com.mcsm.container-porter.cli",
   "name": "容器搬运工（CLI 版）",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "apiVersion": 1,
-  "minManagerVersion": "1.2.0",
+  "minManagerVersion": "1.2.3",
   "author": "McServerManager",
   "description": "只有后端、没有界面：在只装了 mcsm-cli 的机器上用命令行导出 / 导入服务器容器包。功能与完整版一致，适合服务器主机或脚本自动化。",
   "homepage": "https://github.com/WintreeBaka/McServerManager",
@@ -14,7 +14,7 @@
   "backend": {
     "entry": "backend/index.js",
     "runtime": "node",
-    "timeoutMs": 900000
+    "timeoutMs": 1800000
   },
   "contributes": {}
 }

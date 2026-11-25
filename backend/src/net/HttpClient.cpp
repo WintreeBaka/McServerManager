@@ -17,6 +17,31 @@
 #include "core/StringUtil.h"
 
 namespace mcsm {
+namespace {
+
+bool isLoopbackHost(const QString &host)
+{
+    const QString lower = host.toLower();
+    return lower == QLatin1String("localhost") || lower == QLatin1String("127.0.0.1")
+        || lower == QLatin1String("::1");
+}
+
+bool isAllowedHttpUrl(const QUrl &url)
+{
+    if (!url.isValid() || url.host().isEmpty())
+        return false;
+    const QString scheme = url.scheme().toLower();
+    if (scheme == QLatin1String("https"))
+        return true;
+    return scheme == QLatin1String("http") && isLoopbackHost(url.host());
+}
+
+QString securityError(const QUrl &url)
+{
+    return QStringLiteral("拒绝非 HTTPS 地址（本机 localhost 除外）：%1").arg(url.toString());
+}
+
+} // namespace
 
 QString HttpClient::s_userAgent =
     QStringLiteral("McServerManager/1.0 (+https://localhost) Qt/%1").arg(QLatin1String(qVersion()));
@@ -44,11 +69,11 @@ QString HttpClient::userAgent()
     return s_userAgent;
 }
 
-HttpReply HttpClient::get(const QUrl &url, int timeoutMs, int maxRedirects)
+HttpReply HttpClient::get(const QUrl &url, int timeoutMs, int maxRedirects, qint64 maxBytes)
 {
     HttpReply reply;
-    if (!url.isValid()) {
-        reply.error = QStringLiteral("invalid url");
+    if (!isAllowedHttpUrl(url)) {
+        reply.error = url.isValid() ? securityError(url) : QStringLiteral("invalid url");
         return reply;
     }
 
@@ -56,6 +81,10 @@ HttpReply HttpClient::get(const QUrl &url, int timeoutMs, int maxRedirects)
     QUrl current = url;
 
     for (int hop = 0; hop <= maxRedirects; ++hop) {
+        if (!isAllowedHttpUrl(current)) {
+            reply.error = securityError(current);
+            return reply;
+        }
         QNetworkRequest request(current);
         request.setHeader(QNetworkRequest::UserAgentHeader, s_userAgent);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
@@ -65,8 +94,18 @@ HttpReply HttpClient::get(const QUrl &url, int timeoutMs, int maxRedirects)
         QNetworkReply *handle = manager.get(request);
         QEventLoop loop;
         QTimer guard;
+        QByteArray payload;
+        bool tooLarge = false;
         guard.setSingleShot(true);
         QObject::connect(handle, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        QObject::connect(handle, &QNetworkReply::readyRead, &loop, [&]() {
+            payload += handle->readAll();
+            if (payload.size() > maxBytes) {
+                tooLarge = true;
+                handle->abort();
+                loop.quit();
+            }
+        });
         QObject::connect(&guard, &QTimer::timeout, &loop, [&loop, handle]() {
             handle->abort();
             loop.quit();
@@ -75,8 +114,9 @@ HttpReply HttpClient::get(const QUrl &url, int timeoutMs, int maxRedirects)
         loop.exec();
 
         const int status = handle->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const qint64 declared = handle->header(QNetworkRequest::ContentLengthHeader).toLongLong();
         const QVariant location = handle->attribute(QNetworkRequest::RedirectionTargetAttribute);
-        const QByteArray payload = handle->readAll();
+        payload += handle->readAll();
         const QString contentType = handle->header(QNetworkRequest::ContentTypeHeader).toString();
         const QNetworkReply::NetworkError netError = handle->error();
         const QString netErrorText = handle->errorString();
@@ -84,8 +124,17 @@ HttpReply HttpClient::get(const QUrl &url, int timeoutMs, int maxRedirects)
 
         if (status >= 300 && status < 400 && location.isValid()) {
             current = current.resolved(location.toUrl());
+            if (!isAllowedHttpUrl(current)) {
+                reply.error = securityError(current);
+                return reply;
+            }
             Logger::debug(QStringLiteral("http"), QStringLiteral("redirect -> %1").arg(current.toString()));
             continue;
+        }
+        if (tooLarge || declared > maxBytes || payload.size() > maxBytes) {
+            reply.status = status;
+            reply.error = QStringLiteral("HTTP 响应超过上限 %1 字节").arg(maxBytes);
+            return reply;
         }
 
         reply.status = status;
@@ -108,7 +157,8 @@ bool HttpClient::download(const QUrl &url,
                           const QString &targetPath,
                           QString *error,
                           const ProgressFn &progress,
-                          int timeoutMs)
+                          int timeoutMs,
+                          qint64 maxBytes)
 {
     auto failWith = [error](const QString &message) {
         if (error)
@@ -116,8 +166,8 @@ bool HttpClient::download(const QUrl &url,
         return false;
     };
 
-    if (!url.isValid())
-        return failWith(QStringLiteral("invalid download url"));
+    if (!isAllowedHttpUrl(url))
+        return failWith(url.isValid() ? securityError(url) : QStringLiteral("invalid download url"));
 
     QDir().mkpath(QFileInfo(targetPath).absolutePath());
     QSaveFile file(targetPath);
@@ -129,6 +179,10 @@ bool HttpClient::download(const QUrl &url,
     const int maxRedirects = 8;
 
     for (int hop = 0; hop <= maxRedirects; ++hop) {
+        if (!isAllowedHttpUrl(current)) {
+            file.cancelWriting();
+            return failWith(securityError(current));
+        }
         QNetworkRequest request(current);
         request.setHeader(QNetworkRequest::UserAgentHeader, s_userAgent);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
@@ -138,6 +192,8 @@ bool HttpClient::download(const QUrl &url,
         QNetworkReply *handle = manager.get(request);
         QEventLoop loop;
         QTimer guard;
+        qint64 hopBytes = 0;
+        bool tooLarge = false;
         // Buffer one hop in a temp file: a redirect body is discarded, and a
         // 2xx body is copied into the target only after the hop completes.
         QTemporaryFile hopFile;
@@ -151,8 +207,14 @@ bool HttpClient::download(const QUrl &url,
         QObject::connect(handle, &QNetworkReply::finished, &loop, &QEventLoop::quit);
         QObject::connect(handle, &QNetworkReply::readyRead, &loop, [&]() {
             const QByteArray chunk = handle->readAll();
+            hopBytes += chunk.size();
             if (!chunk.isEmpty())
                 hopFile.write(chunk);
+            if (hopBytes > maxBytes) {
+                tooLarge = true;
+                handle->abort();
+                loop.quit();
+            }
         });
         QObject::connect(handle, &QNetworkReply::downloadProgress, &loop,
                          [&progress](qint64 got, qint64 total) {
@@ -167,7 +229,9 @@ bool HttpClient::download(const QUrl &url,
         loop.exec();
 
         const int status = handle->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const qint64 declared = handle->header(QNetworkRequest::ContentLengthHeader).toLongLong();
         const QByteArray rest = handle->readAll();
+        hopBytes += rest.size();
         if (!rest.isEmpty())
             hopFile.write(rest);
         const QVariant location = handle->attribute(QNetworkRequest::RedirectionTargetAttribute);
@@ -177,7 +241,15 @@ bool HttpClient::download(const QUrl &url,
 
         if (status >= 300 && status < 400 && location.isValid()) {
             current = current.resolved(location.toUrl());
+            if (!isAllowedHttpUrl(current)) {
+                file.cancelWriting();
+                return failWith(securityError(current));
+            }
             continue;
+        }
+        if (tooLarge || declared > maxBytes || hopBytes > maxBytes) {
+            file.cancelWriting();
+            return failWith(QStringLiteral("下载内容超过上限 %1 字节").arg(maxBytes));
         }
         if (netError != QNetworkReply::NoError || status < 200 || status >= 300) {
             file.cancelWriting();

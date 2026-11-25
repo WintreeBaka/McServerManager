@@ -195,6 +195,9 @@ $detail = Invoke-Cli @("server", "get", "--id", $serverId)
 # honest answer is "unknown" (never "stopped" - see audit M5).
 Write-Result "server get" `
     ($detail.ok -and ($detail.data.status -in @("stopped", "unknown"))) $detail.error.message
+Write-Result "server get redacts RCON password" `
+    (-not ($detail.data.PSObject.Properties.Name -contains "rconPassword")) `
+    "rconPassword was returned"
 
 $badUpdateLevel = Invoke-Cli @(
     "server", "update", "--id", $serverId, "--level-name", "../escape"
@@ -286,6 +289,43 @@ $backupList = Invoke-Cli @("backup", "list", "--id", $serverId)
 Write-Result "backup list" ($backupList.ok -and $backupList.data.count -ge 1) `
     ("count=" + $backupList.data.count)
 
+$badRemove = Invoke-Cli @(
+    "backup", "remove", "--id", $serverId, "--backup", "../../outside.tar.gz"
+) -AllowFailure
+Write-Result "backup remove rejects traversal" `
+    ((-not $badRemove.ok) -and $badRemove.error.code -eq "INVALID_ARGUMENT") `
+    ("code=" + $badRemove.error.code)
+
+$badRestorePath = Join-Path $assets "outside.tar.gz"
+$badRestore = Invoke-Cli @(
+    "backup", "restore", "--id", $serverId, "--backup", $badRestorePath
+) -AllowFailure
+Write-Result "backup restore rejects absolute path" `
+    ((-not $badRestore.ok) -and $badRestore.error.code -eq "INVALID_ARGUMENT") `
+    ("code=" + $badRestore.error.code)
+
+Add-Type -AssemblyName System.IO.Compression | Out-Null
+Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+$evilZipName = "evil-backup.zip"
+$evilZip = Join-Path (Join-Path $serverDir "backups") $evilZipName
+$evilArchive = [System.IO.Compression.ZipFile]::Open($evilZip, 'Create')
+try {
+    $entry = $evilArchive.CreateEntry("../backup-escape.txt")
+    $writer = New-Object System.IO.StreamWriter($entry.Open())
+    $writer.Write("escaped")
+    $writer.Dispose()
+} finally {
+    $evilArchive.Dispose()
+}
+$evilRestore = Invoke-Cli @(
+    "backup", "restore", "--id", $serverId, "--backup", $evilZipName
+) -AllowFailure
+Write-Result "backup restore rejects zip-slip" (-not $evilRestore.ok) ("code=" + $evilRestore.error.code)
+Write-Result "zip-slip restore leaves no escaped file" `
+    (-not (Test-Path (Join-Path $serverDir "backup-escape.txt"))) "escaped file was written"
+Write-Result "zip-slip failure rolls world back" `
+    (Test-Path (Join-Path $worldDir "level.dat")) "world data was not restored"
+
 $schedule = Invoke-Cli @("backup", "schedule", "--id", $serverId, "--enabled", "true",
                         "--interval", "10", "--keep", "3")
 Write-Result "backup schedule" ($schedule.ok -and $schedule.data.schedule.enabled) $schedule.error.message
@@ -313,6 +353,14 @@ $toggle = Invoke-Cli @("plugin", "toggle", "--id", $serverId, "--file", "FakePlu
 Write-Result "plugin disable" ($toggle.ok) $toggle.error.message
 $disabledOk = Test-Path (Join-Path $serverDir "plugins\FakePlugin.jar.disabled")
 Write-Result "plugin renamed to .disabled" $disabledOk "file not renamed"
+
+$httpInstall = Invoke-Cli @(
+    "plugin", "install", "--id", $serverId, "--url", "http://example.com/plugin.jar",
+    "--file", "remote.jar"
+) -AllowFailure
+Write-Result "plugin URL install requires HTTPS" `
+    ((-not $httpInstall.ok) -and $httpInstall.error.code -eq "INSECURE_URL") `
+    ("code=" + $httpInstall.error.code)
 
 # ------------------------------------------------------- start diagnostics ---
 Write-Host ""

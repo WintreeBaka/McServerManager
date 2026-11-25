@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -47,6 +48,94 @@ QString findHostTar()
         }
     }
     return QString();
+}
+
+bool isSafeBackupName(const QString &name, QString *error)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty() || QFileInfo(trimmed).fileName() != trimmed
+        || trimmed.contains(QLatin1String(".."))) {
+        if (error)
+            *error = QStringLiteral("备份名只能是 backups 目录内的文件名");
+        return false;
+    }
+    const QString lower = trimmed.toLower();
+    if (!lower.endsWith(QLatin1String(".tar.gz")) && !lower.endsWith(QLatin1String(".zip"))) {
+        if (error)
+            *error = QStringLiteral("备份文件必须使用 .tar.gz 或 .zip 后缀");
+        return false;
+    }
+    return true;
+}
+
+bool auditTarArchive(const QString &hostTar, const QString &archivePath, QString *error)
+{
+    const ProcessResult names = ProcessRunner::run(hostTar, {QStringLiteral("-tzf"), archivePath}, 300000);
+    if (!names.ok()) {
+        if (error)
+            *error = names.errorText();
+        return false;
+    }
+    const QStringList members = StringUtil::splitLines(names.stdOut);
+    if (members.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("备份归档没有成员或无法读取成员列表");
+        return false;
+    }
+    for (const QString &member : members) {
+        if (!Archive::isSafeRelativePath(member)) {
+            if (error)
+                *error = QStringLiteral("备份包含不安全路径：%1").arg(member);
+            return false;
+        }
+    }
+
+    const ProcessResult verbose =
+        ProcessRunner::run(hostTar, {QStringLiteral("-tvzf"), archivePath}, 300000);
+    if (!verbose.ok()) {
+        if (error)
+            *error = verbose.errorText();
+        return false;
+    }
+    for (const QString &line : StringUtil::splitLines(verbose.stdOut)) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.startsWith(QLatin1Char('l')) || trimmed.startsWith(QLatin1Char('h'))
+            || trimmed.contains(QLatin1String("link to"), Qt::CaseInsensitive)) {
+            if (error)
+                *error = QStringLiteral("备份包含符号链接或硬链接，已拒绝恢复");
+            return false;
+        }
+    }
+    return true;
+}
+
+bool moveExtractedZip(const ServerRecord &record, const QString &staging,
+                      const QStringList &members, QString *error)
+{
+    QStringList restored;
+    for (const QString &member : members) {
+        const QString source = QDir(staging).filePath(member);
+        if (!QFileInfo::exists(source))
+            continue;
+        const QString destination = QDir(record.dir).filePath(member);
+        if (QFileInfo::exists(destination)) {
+            if (error)
+                *error = QStringLiteral("恢复目标已存在：%1").arg(destination);
+            for (const QString &path : restored)
+                QDir(QDir(record.dir).filePath(path)).removeRecursively();
+            return false;
+        }
+        QDir().mkpath(QFileInfo(destination).absolutePath());
+        if (!QDir().rename(source, destination)) {
+            if (error)
+                *error = QStringLiteral("无法移入恢复文件：%1").arg(destination);
+            for (const QString &path : restored)
+                QDir(QDir(record.dir).filePath(path)).removeRecursively();
+            return false;
+        }
+        restored << member;
+    }
+    return true;
 }
 
 } // namespace
@@ -167,6 +256,8 @@ bool BackupService::archive(const ServerRecord &record,
                                                          600000);
         if (result.ok() && QFileInfo::exists(hostTarget) && QFileInfo(hostTarget).size() > 512)
             return true;
+        if (QFileInfo::exists(hostTarget))
+            QFile::remove(hostTarget);
         Logger::warn(QStringLiteral("backup"),
                      QStringLiteral("container archive failed, falling back to host tar: %1")
                          .arg(result.errorText()));
@@ -178,8 +269,10 @@ bool BackupService::archive(const ServerRecord &record,
         QStringList args {QStringLiteral("-czf"), QStringLiteral("backups/") + outputName};
         args << entries;
         const ProcessResult result = ProcessRunner::run(hostTar, args, 900000, QByteArray(), record.dir);
-        if (result.ok() || QFileInfo::exists(hostTarget))
+        if (result.ok() && QFileInfo::exists(hostTarget) && QFileInfo(hostTarget).size() > 512)
             return true;
+        if (QFileInfo::exists(hostTarget))
+            QFile::remove(hostTarget);
         if (error)
             *error = result.errorText();
     } else if (error) {
@@ -233,6 +326,8 @@ bool BackupService::extract(const ServerRecord &record,
     }
     const QString hostTar = findHostTar();
     if (archivePath.endsWith(QLatin1String(".tar.gz")) && !hostTar.isEmpty()) {
+        if (!auditTarArchive(hostTar, archivePath, error))
+            return false;
         QStringList arguments {QStringLiteral("-xzf"), archivePath};
         arguments << members;
         const ProcessResult result = ProcessRunner::run(hostTar, arguments, 900000, QByteArray(), record.dir);
@@ -243,31 +338,16 @@ bool BackupService::extract(const ServerRecord &record,
         return false;
     }
     if (archivePath.endsWith(QLatin1String(".zip"))) {
-        // Arguments go through QProcess (no shell string interpolation), so a
-        // path containing quotes can neither break the command nor inject one.
-        const QString sevenZip = Archive::toolPath();
-        QString program;
-        QStringList arguments;
-        if (!sevenZip.isEmpty()) {
-            program = sevenZip;
-            arguments << QStringLiteral("x") << archivePath
-                      << QStringLiteral("-o%1").arg(QDir::toNativeSeparators(record.dir))
-                      << members << QStringLiteral("-y");
-        } else if (!hostTar.isEmpty()) {
-            program = hostTar;
-            arguments << QStringLiteral("-xf") << archivePath
-                      << QStringLiteral("-C") << record.dir << members;
-        } else {
-            if (error)
-                *error = QStringLiteral("无法解压 %1（缺少 tar 或 7-Zip）").arg(archivePath);
+        const QString staging = QDir(record.dir)
+                                    .filePath(QStringLiteral(".mcsm/restore-extract-%1")
+                                                  .arg(StringUtil::randomToken(8)));
+        if (!Archive::extractZip(archivePath, staging, error)) {
+            Archive::removeTree(staging, nullptr);
             return false;
         }
-        const ProcessResult result = ProcessRunner::run(program, arguments, 900000);
-        if (result.ok())
-            return true;
-        if (error)
-            *error = result.errorText();
-        return false;
+        const bool moved = moveExtractedZip(record, staging, members, error);
+        Archive::removeTree(staging, nullptr);
+        return moved;
     }
     if (error)
         *error = QStringLiteral("无法解压 %1（缺少 tar 或 7-Zip）").arg(archivePath);
@@ -388,9 +468,10 @@ Result BackupService::restore(ServerStore &store,
     if (record.id.isEmpty())
         return Result::fail(QStringLiteral("NOT_FOUND"), QStringLiteral("服务器 %1 不存在").arg(id));
 
-    QString archivePath = QFileInfo(name).isAbsolute()
-                              ? name
-                              : QDir(record.backupDir()).filePath(name);
+    QString nameError;
+    if (!isSafeBackupName(name, &nameError))
+        return Result::fail(QStringLiteral("INVALID_ARGUMENT"), nameError);
+    const QString archivePath = QDir(record.backupDir()).filePath(name);
     if (!QFileInfo::exists(archivePath))
         return Result::fail(QStringLiteral("NOT_FOUND"), QStringLiteral("备份 %1 不存在").arg(name));
 
@@ -460,6 +541,8 @@ Result BackupService::restore(ServerStore &store,
         for (const QString &entry : moved) {
             const QString source = QDir(rollbackDir).filePath(entry);
             const QString destination = QDir(record.dir).filePath(entry);
+            if (QFileInfo::exists(destination))
+                QDir(destination).removeRecursively();
             QDir().mkpath(QFileInfo(destination).absolutePath());
             QDir().rename(source, destination);
         }
@@ -490,7 +573,12 @@ Result BackupService::restore(ServerStore &store,
 
 Result BackupService::remove(const ServerRecord &record, const QString &name)
 {
-    const QString path = QFileInfo(name).isAbsolute() ? name : QDir(record.backupDir()).filePath(name);
+    QString nameError;
+    if (!isSafeBackupName(name, &nameError))
+        return Result::fail(QStringLiteral("INVALID_ARGUMENT"), nameError);
+    const QString path = QDir(record.backupDir()).filePath(name);
+    if (!Archive::isInside(record.backupDir(), path))
+        return Result::fail(QStringLiteral("INVALID_ARGUMENT"), QStringLiteral("备份路径越界"));
     if (!QFileInfo::exists(path))
         return Result::fail(QStringLiteral("NOT_FOUND"), QStringLiteral("备份 %1 不存在").arg(name));
     if (!QFile::remove(path))
@@ -523,8 +611,12 @@ int BackupService::prune(const ServerRecord &record, int keep)
     });
     int removed = 0;
     for (int i = keep; i < automatic.size(); ++i) {
-        if (QFile::remove(automatic.at(i).path))
+        const QString path = automatic.at(i).path;
+        if (isSafeBackupName(QFileInfo(path).fileName(), nullptr)
+            && Archive::isInside(record.backupDir(), path)
+            && QFile::remove(path)) {
             ++removed;
+        }
     }
     if (removed > 0) {
         QJsonObject index = readIndex(record);

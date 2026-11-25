@@ -4,6 +4,17 @@
 This file contains only information about changes related to that package exclusively.
 The full history of changes is listed in history.txt in main 7-Zip program.
 
+26.06          2026-11-06
+-------------------------
+- Improved support for split files created by "split" utility in Linux.
+- Some bugs and vulnerabilities were fixed.
+
+
+26.05          2026-10-21
+-------------------------
+- optimizations for decompressing ZIP archives compressed using the Shrink method.
+
+
 26.04          2026-10-05
 -------------------------
 - Some bugs and vulnerabilities were fixed.

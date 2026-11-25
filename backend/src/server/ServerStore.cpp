@@ -7,11 +7,83 @@
 #include <QLockFile>
 #include <QSet>
 
+#ifdef Q_OS_WIN
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <aclapi.h>
+#endif
+
 #include "core/AppPaths.h"
 #include "core/Logger.h"
 #include "core/StringUtil.h"
 
 namespace mcsm {
+namespace {
+
+bool restrictRegistryPermissions(const QString &path)
+{
+#ifdef Q_OS_WIN
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return false;
+    DWORD needed = 0;
+    GetTokenInformation(token, TokenUser, nullptr, 0, &needed);
+    if (!needed) {
+        CloseHandle(token);
+        return false;
+    }
+    QByteArray buffer(int(needed), Qt::Uninitialized);
+    if (!GetTokenInformation(token, TokenUser, buffer.data(), needed, &needed)) {
+        CloseHandle(token);
+        return false;
+    }
+    CloseHandle(token);
+    auto *tokenUser = reinterpret_cast<TOKEN_USER *>(buffer.data());
+
+    PSID owner = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const DWORD ownerStatus = GetNamedSecurityInfoW(
+        const_cast<LPWSTR>(reinterpret_cast<LPCWSTR>(path.utf16())),
+        SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &owner, nullptr, nullptr, nullptr, &descriptor);
+    if (ownerStatus != ERROR_SUCCESS)
+        return false;
+
+    EXPLICIT_ACCESS_W access[2] {};
+    int count = 0;
+    auto addAccess = [&](PSID sid) {
+        access[count].grfAccessPermissions = FILE_ALL_ACCESS;
+        access[count].grfAccessMode = SET_ACCESS;
+        access[count].grfInheritance = NO_INHERITANCE;
+        access[count].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        access[count].Trustee.TrusteeType = TRUSTEE_IS_USER;
+        access[count].Trustee.ptstrName = reinterpret_cast<LPWSTR>(sid);
+        ++count;
+    };
+    if (owner)
+        addAccess(owner);
+    if (!owner || !EqualSid(owner, tokenUser->User.Sid))
+        addAccess(tokenUser->User.Sid);
+
+    PACL acl = nullptr;
+    const DWORD aclStatus = SetEntriesInAclW(DWORD(count), access, nullptr, &acl);
+    LocalFree(descriptor);
+    if (aclStatus != ERROR_SUCCESS)
+        return false;
+    const DWORD result = SetNamedSecurityInfoW(
+        const_cast<LPWSTR>(reinterpret_cast<LPCWSTR>(path.utf16())),
+        SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+        nullptr, nullptr, acl, nullptr);
+    LocalFree(acl);
+    return result == ERROR_SUCCESS;
+#else
+    return QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+#endif
+}
+
+} // namespace
 
 ServerStore::ServerStore(const QString &registryPath)
     : m_path(registryPath.isEmpty() ? AppPaths::registryFile() : registryPath)
@@ -69,6 +141,10 @@ bool ServerStore::reload()
         records.append(record);
     }
     m_records = records;
+    if (!restrictRegistryPermissions(m_path)) {
+        Logger::warn(QStringLiteral("store"),
+                     QStringLiteral("could not restrict %1 after reload").arg(m_path));
+    }
     return true;
 }
 
@@ -85,7 +161,7 @@ bool ServerStore::save() const
     }
     QJsonArray array;
     for (const ServerRecord &record : m_records)
-        array.append(record.toJson());
+        array.append(record.toJson(false));
     QJsonObject root;
     root.insert(QStringLiteral("version"), 1);
     root.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
@@ -94,6 +170,10 @@ bool ServerStore::save() const
     if (!Json::writeObjectFile(m_path, root, &error)) {
         Logger::error(QStringLiteral("store"), error);
         return false;
+    }
+    if (!restrictRegistryPermissions(m_path)) {
+        Logger::warn(QStringLiteral("store"),
+                     QStringLiteral("could not restrict %1 to the current user").arg(m_path));
     }
     return true;
 }

@@ -64,6 +64,10 @@ target_include_directories(mcsm-cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_link_libraries(mcsm-cli PRIVATE Qt6::Core Qt6::Network)
 
+if(WIN32)
+    target_link_libraries(mcsm-cli PRIVATE advapi32)
+endif()
+
 set_target_properties(mcsm-cli PROPERTIES
     WIN32_EXECUTABLE OFF
     MACOSX_BUNDLE OFF

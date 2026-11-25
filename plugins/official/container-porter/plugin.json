@@ -1,9 +1,9 @@
 {
   "id": "com.mcsm.container-porter",
   "name": "容器搬运工",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "apiVersion": 1,
-  "minManagerVersion": "1.2.0",
+  "minManagerVersion": "1.2.3",
   "scope": "global",
   "description": "把选中服务器的 Docker 容器导出成一个 .tar 容器包，或把容器包导入成一台新的服务器（直接加入服务器列表），用于换机或备份迁移。",
   "author": "McServerManager",
@@ -16,7 +16,7 @@
   "backend": {
     "entry": "backend/index.js",
     "runtime": "node",
-    "timeoutMs": 900000
+    "timeoutMs": 1800000
   },
   "hooks": ["plugin.install", "plugin.enable"],
   "contributes": {

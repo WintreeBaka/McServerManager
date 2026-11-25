@@ -26,12 +26,14 @@ class HttpClient
 public:
     using ProgressFn = std::function<void(qint64 received, qint64 total)>;
 
-    static HttpReply get(const QUrl &url, int timeoutMs = 30000, int maxRedirects = 6);
+    static HttpReply get(const QUrl &url, int timeoutMs = 30000, int maxRedirects = 6,
+                         qint64 maxBytes = 16LL * 1024 * 1024);
     static bool download(const QUrl &url,
                          const QString &targetPath,
                          QString *error,
                          const ProgressFn &progress = ProgressFn(),
-                         int timeoutMs = 900000);
+                         int timeoutMs = 900000,
+                         qint64 maxBytes = 4LL * 1024 * 1024 * 1024);
     static void setUserAgent(const QString &userAgent);
     static QString userAgent();
 

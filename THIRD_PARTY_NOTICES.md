@@ -18,11 +18,14 @@
 ## 7-Zip（内置 `7za.exe`）
 
 * 位置：`third_party/7zip/`，发行包内为 `7zip/7za.exe`
-* 版本：7-Zip 26.04 Extra（`7za.exe` 独立命令行版本）
+* 版本：7-Zip 26.06 Extra（官方 x64 `7za.exe` 独立命令行版本）
 * 许可：**GNU LGPL**，并带有 unRAR 限制条款（详见随附的
   [`LICENSE-7zip.txt`](third_party/7zip/LICENSE-7zip.txt)）。
 * 用途：解压 / 校验**管理器插件包**（zip）。本项目未修改其源码，仅原样随包分发可执行文件。
 * 源码获取：<https://www.7-zip.org/> 与 <https://github.com/ip7z/7zip>。
+* 完整性：官方发布包与随包二进制的 SHA-256 记录在
+  [`SHA256SUMS.txt`](third_party/7zip/SHA256SUMS.txt)，打包和 CI 使用
+  `tools/verify-third-party.ps1` 校验。
 
 ## Docker 镜像（运行时下载，不在本项目分发物内）
 

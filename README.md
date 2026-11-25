@@ -216,16 +216,21 @@ McServerManager/
    └─ world/ world_nether/ world_the_end/
 ```
 
+`servers.json` 保存 RCON 凭据，管理器会将其权限收窄到当前用户。`config-backups/`、
+世界备份和容器搬运工导出的 `.tar` 包也可能包含旧的 `server.properties` 或日志，
+应视为凭据资产，不要提交到仓库或公开分享。
+
 ## 自带工具
 
 ```bash
 python tools/static_check.py       # 源码一致性检查（include / 括号 / 声明实现 / 编码陷阱 / CMake 清单）
-powershell -File tools/smoke-test.ps1   # 后端冒烟测试（56 项，含插件包回归，不需要 Docker）
+powershell -File tools/smoke-test.ps1   # 后端冒烟测试（85 项，含插件包回归，不需要 Docker）
 powershell -File tools/gui-smoke.ps1    # 界面冒烟测试（启动、拖拽、快速切页残留对比、截图）
 powershell -File tools/gui-smoke.ps1 -Page settings-runtime -Resize 1100x700 -Screenshot small.png   # 小窗口布局回归
 python tools/check-endpoints.py    # 检查上游 API（Mojang / Paper / Purpur / Fabric / Modrinth…）可用性
 python tools/rcon-probe.py 127.0.0.1 25575 <密码>   # RCON 协议探针
 python tools/host-runtime-check.py  # 实验性「本机 JDK」模式端到端检查
+powershell -File tools/verify-third-party.ps1  # 校验内置 7-Zip x64 版本与 SHA-256
 ```
 
 ## 打包发行版

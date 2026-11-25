@@ -1,5 +1,6 @@
 #include "plugin/PluginManager.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -81,6 +82,9 @@ QJsonObject PluginHit::toJson() const
     object.insert(QStringLiteral("pageUrl"), pageUrl);
     object.insert(QStringLiteral("downloadUrl"), downloadUrl);
     object.insert(QStringLiteral("fileName"), fileName);
+    object.insert(QStringLiteral("sha1"), sha1);
+    object.insert(QStringLiteral("sha512"), sha512);
+    object.insert(QStringLiteral("expectedSize"), double(expectedSize));
     object.insert(QStringLiteral("versionName"), versionName);
     object.insert(QStringLiteral("downloads"), double(downloads));
     object.insert(QStringLiteral("installable"), installable);
@@ -294,11 +298,28 @@ bool PluginManager::resolveDownload(PluginHit *hit, const ServerRecord &record, 
                 *error = QStringLiteral("该版本没有可下载文件");
             return false;
         }
-        const QJsonObject file = files.first().toObject();
+        QJsonObject file = files.first().toObject();
+        for (const QJsonValue &candidate : files) {
+            if (candidate.toObject().value(QStringLiteral("primary")).toBool(false)) {
+                file = candidate.toObject();
+                break;
+            }
+        }
+        const QJsonObject hashes = file.value(QStringLiteral("hashes")).toObject();
+        hit->sha1 = Json::str(hashes, QStringLiteral("sha1")).toLower();
+        hit->sha512 = Json::str(hashes, QStringLiteral("sha512")).toLower();
+        hit->expectedSize = Json::bigint(file, QStringLiteral("size"));
         hit->downloadUrl = Json::str(file, QStringLiteral("url"));
         hit->fileName = Json::str(file, QStringLiteral("filename"));
         hit->versionName = Json::str(version, QStringLiteral("version_number"));
-        return !hit->downloadUrl.isEmpty();
+        if (hit->downloadUrl.isEmpty())
+            return false;
+        if (hit->sha1.isEmpty() && hit->sha512.isEmpty()) {
+            if (error)
+                *error = QStringLiteral("Modrinth 文件没有可用哈希，已拒绝未校验下载");
+            return false;
+        }
+        return true;
     }
 
     if (hit->source == QLatin1String("hangar")) {
@@ -344,9 +365,13 @@ Result PluginManager::install(const ServerRecord &record, const PluginHit &hit)
     }
     PluginHit resolved = hit;
     QString resolveError;
-    if (!resolveDownload(&resolved, record, &resolveError))
+    if (resolved.downloadUrl.isEmpty()
+        && !resolveDownload(&resolved, record, &resolveError))
         return Result::fail(QStringLiteral("PLUGIN_RESOLVE_FAILED"),
                             QStringLiteral("无法解析插件下载地址"), resolveError);
+    if (!resolved.downloadUrl.startsWith(QLatin1String("https://"), Qt::CaseInsensitive))
+        return Result::fail(QStringLiteral("INSECURE_URL"),
+                            QStringLiteral("插件下载地址必须使用 HTTPS"), resolved.downloadUrl);
 
     QString fileName = safePluginFileName(resolved.fileName);
     if (fileName.isEmpty())
@@ -362,9 +387,33 @@ Result PluginManager::install(const ServerRecord &record, const PluginHit &hit)
                             QStringLiteral("插件目标路径越界，已拒绝下载"), target);
 
     QString downloadError;
-    if (!HttpClient::download(QUrl(resolved.downloadUrl), target, &downloadError)) {
+    if (!HttpClient::download(QUrl(resolved.downloadUrl), target, &downloadError, {},
+                              900000, resolved.expectedSize > 0
+                                  ? resolved.expectedSize
+                                  : 512LL * 1024 * 1024)) {
         return Result::fail(QStringLiteral("PLUGIN_DOWNLOAD_FAILED"),
                             QStringLiteral("插件下载失败"), downloadError);
+    }
+    auto digest = [&target](QCryptographicHash::Algorithm algorithm) {
+        QFile file(target);
+        if (!file.open(QIODevice::ReadOnly))
+            return QString();
+        QCryptographicHash hash(algorithm);
+        if (!hash.addData(&file))
+            return QString();
+        return QString::fromLatin1(hash.result().toHex());
+    };
+    const bool badSize = resolved.expectedSize > 0
+        && QFileInfo(target).size() != resolved.expectedSize;
+    const bool badSha1 = !resolved.sha1.isEmpty()
+        && digest(QCryptographicHash::Sha1).compare(resolved.sha1, Qt::CaseInsensitive) != 0;
+    const bool badSha512 = !resolved.sha512.isEmpty()
+        && digest(QCryptographicHash::Sha512).compare(resolved.sha512, Qt::CaseInsensitive) != 0;
+    if (badSize || badSha1 || badSha512) {
+        QFile::remove(target);
+        return Result::fail(QStringLiteral("PLUGIN_HASH_MISMATCH"),
+                            QStringLiteral("插件下载完整性校验失败"),
+                            QStringLiteral("文件已被删除，请检查上游源是否被篡改"));
     }
     Logger::info(QStringLiteral("plugin"), QStringLiteral("installed %1").arg(fileName));
     QJsonObject data = resolved.toJson();

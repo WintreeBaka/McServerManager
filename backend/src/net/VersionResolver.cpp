@@ -70,6 +70,11 @@ QVector<int> parseVersionTriple(const QString &version)
     return {match.captured(1).toInt(), match.captured(2).toInt(), match.captured(3).toInt()};
 }
 
+QString pathSegment(const QString &value)
+{
+    return QString::fromLatin1(QUrl::toPercentEncoding(value));
+}
+
 bool versionAtLeast(const QString &version, int major, int minor, int patch, bool exclusivePatch = false)
 {
     const QVector<int> parts = parseVersionTriple(version);
@@ -132,6 +137,9 @@ QJsonObject ResolvedServer::toJson() const
     object.insert(QStringLiteral("build"), build);
     object.insert(QStringLiteral("jarUrl"), jarUrl);
     object.insert(QStringLiteral("jarName"), jarName);
+    object.insert(QStringLiteral("sha1"), sha1);
+    object.insert(QStringLiteral("sha256"), sha256);
+    object.insert(QStringLiteral("sizeBytes"), double(sizeBytes));
     object.insert(QStringLiteral("javaMajor"), javaMajor);
     object.insert(QStringLiteral("channel"), channel);
     object.insert(QStringLiteral("releaseTime"), releaseTime);
@@ -375,6 +383,9 @@ bool VersionResolver::resolve(const QString &type,
         const QJsonObject downloads = versionJson.value(QStringLiteral("downloads")).toObject();
         const QJsonObject server = downloads.value(QStringLiteral("server")).toObject();
         resolved.jarUrl = Json::str(server, QStringLiteral("url"));
+        resolved.sha1 = Json::str(server, QStringLiteral("sha1")).toLower();
+        resolved.sha256 = Json::str(server, QStringLiteral("sha256")).toLower();
+        resolved.sizeBytes = Json::bigint(server, QStringLiteral("size"));
         resolved.channel = QStringLiteral("release");
         // Mojang publishes the exact required JDK for every version; prefer it
         // over our heuristic.
@@ -395,7 +406,7 @@ bool VersionResolver::resolve(const QString &type,
         // v3 returns a plain array of builds with downloads keyed by "server:default".
         const QJsonArray list = fetchJsonArray(
             {QStringLiteral("%1/projects/paper/versions/%2/builds")
-                 .arg(QLatin1String(kPaperApi), mcVersion)},
+                 .arg(QLatin1String(kPaperApi), pathSegment(mcVersion))},
             error);
         if (list.isEmpty()) {
             if (error && error->isEmpty())
@@ -443,6 +454,12 @@ bool VersionResolver::resolve(const QString &type,
             }
         }
         resolved.jarUrl = Json::str(server, QStringLiteral("url"));
+        const QJsonObject checksums = server.value(QStringLiteral("checksums")).toObject();
+        resolved.sha1 = Json::str(checksums, QStringLiteral("sha1")).toLower();
+        resolved.sha256 = Json::str(checksums, QStringLiteral("sha256")).toLower();
+        if (resolved.sha256.isEmpty())
+            resolved.sha256 = Json::str(server, QStringLiteral("sha256")).toLower();
+        resolved.sizeBytes = Json::bigint(server, QStringLiteral("size"));
         if (resolved.jarUrl.isEmpty()) {
             if (error)
                 *error = QStringLiteral("paper build %1 has no server download").arg(chosenId);
@@ -457,13 +474,13 @@ bool VersionResolver::resolve(const QString &type,
 
     if (flavour == QLatin1String("purpur")) {
         const QJsonObject latest = fetchJson(
-            {QStringLiteral("%1/purpur/%2/latest").arg(QLatin1String(kPurpurApi), mcVersion)},
+            {QStringLiteral("%1/purpur/%2/latest").arg(QLatin1String(kPurpurApi), pathSegment(mcVersion))},
             error);
         if (latest.isEmpty())
             return false;
         resolved.build = Json::str(latest, QStringLiteral("build"));
         resolved.jarUrl = QStringLiteral("%1/purpur/%2/latest/download")
-                              .arg(QLatin1String(kPurpurApi), mcVersion);
+                              .arg(QLatin1String(kPurpurApi), pathSegment(mcVersion));
         resolved.channel = QStringLiteral("default");
         *out = resolved;
         return true;
@@ -513,7 +530,8 @@ bool VersionResolver::resolve(const QString &type,
 
         resolved.build = loaderVersion;
         resolved.jarUrl = QStringLiteral("%1/versions/loader/%2/%3/%4/server/jar")
-                              .arg(QLatin1String(kFabricApi), mcVersion, loaderVersion, installerVersion);
+                              .arg(QLatin1String(kFabricApi), pathSegment(mcVersion),
+                                   pathSegment(loaderVersion), pathSegment(installerVersion));
         resolved.channel = QStringLiteral("stable");
         resolved.notes = QStringLiteral("Fabric loader %1 (installer %2)").arg(loaderVersion, installerVersion);
         *out = resolved;

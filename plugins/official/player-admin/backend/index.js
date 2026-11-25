@@ -23,7 +23,7 @@ const readline = require("readline");
 const core = require("./lib/mcsm");
 
 const PLUGIN_ID = "com.mcsm.player-admin";
-const PLUGIN_VERSION = "1.0.0";
+const PLUGIN_VERSION = "1.1.0";
 
 function reply(object) {
     process.stdout.write(JSON.stringify(object) + "\n");
@@ -171,7 +171,8 @@ reader.on("line", (line) => {
             reply(result);
         })
         .catch((error) => {
+            console.error(error && error.stack ? error.stack : error);
             reply(fail("PLUGIN_ERROR", error && error.message ? error.message : String(error),
-                       error && error.stack ? error.stack : ""));
+                       "详见管理器日志"));
         });
 });

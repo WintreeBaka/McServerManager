@@ -15,7 +15,7 @@ param(
     [string]$BaseUrl = $env:GITEA_URL,
     [string]$Owner = "w",
     [string]$Repo = "McServerManager",
-    [string]$Version = "1.2.2",
+    [string]$Version = "1.2.3",
     [string]$Tag = "",
     [string]$Title = "",
     [string]$NotesFile = "",
@@ -35,7 +35,7 @@ if ($Assets.Count -eq 0) {
         "dist\McServerManager-$Version-win64.zip",
         "dist\McServerManager-$Version-win64-cli.zip",
         "docs\PLUGIN-SDK.md",
-        "dist\plugins\com.mcsm.player-admin-1.0.0.zip"
+        "dist\plugins\com.mcsm.player-admin-1.1.0.zip"
     )
 }
 

@@ -16,6 +16,9 @@ struct ServerRecord
     QString build;
     QString jarName = QStringLiteral("server.jar");
     QString jarUrl;
+    QString sha1;
+    QString sha256;
+    qint64 jarSize = 0;
     int javaMajor = 17;
     QString image;                            // eclipse-temurin:17-jre
     /// "docker" (default: JDK lives in a container image) or "host" (a JDK
@@ -45,7 +48,7 @@ struct ServerRecord
     ServerRecord();
 
     static ServerRecord fromJson(const QJsonObject &object);
-    QJsonObject toJson() const;
+    QJsonObject toJson(bool redactSecrets = true) const;
 
     QString containerName() const;
     QString containerMemoryLimit() const;

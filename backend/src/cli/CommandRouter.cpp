@@ -429,7 +429,7 @@ Result CommandRouter::cmdServer()
                                        QStringLiteral("通过服务器设置修改"), &diff, nullptr);
         }
 
-        Result result = Result::ok(updated.toJson());
+        Result result = Result::ok(updated.toJson(true));
         if (updated.image != record.image)
             result.warn(QStringLiteral("运行环境已改为 %1，下次启动会自动拉取").arg(updated.image));
         if (updated.eulaAccepted && !record.eulaAccepted)

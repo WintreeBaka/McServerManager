@@ -1,5 +1,6 @@
 #include "server/ServerInstaller.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -19,6 +20,39 @@
 
 namespace mcsm {
 namespace {
+
+QString fileDigest(const QString &path, QCryptographicHash::Algorithm algorithm)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    QCryptographicHash hash(algorithm);
+    if (!hash.addData(&file))
+        return QString();
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+bool verifyJarIntegrity(const ServerRecord &record, const QString &path, QString *error)
+{
+    if (record.jarSize > 0 && QFileInfo(path).size() != record.jarSize) {
+        if (error)
+            *error = QStringLiteral("服务端文件大小与上游元数据不一致");
+        return false;
+    }
+    if (!record.sha1.isEmpty()
+        && fileDigest(path, QCryptographicHash::Sha1).compare(record.sha1, Qt::CaseInsensitive) != 0) {
+        if (error)
+            *error = QStringLiteral("服务端 SHA-1 校验失败");
+        return false;
+    }
+    if (!record.sha256.isEmpty()
+        && fileDigest(path, QCryptographicHash::Sha256).compare(record.sha256, Qt::CaseInsensitive) != 0) {
+        if (error)
+            *error = QStringLiteral("服务端 SHA-256 校验失败");
+        return false;
+    }
+    return true;
+}
 
 void report(const InstallProgressFn &progress, const QString &stage, int percent, const QString &detail)
 {
@@ -74,9 +108,12 @@ bool ServerInstaller::downloadJar(ServerRecord *record, QString *error, const In
 
     if (QFileInfo::exists(target) && QFileInfo(target).size() > 4096
         && Archive::isZipArchive(target)) {
-        report(progress, QStringLiteral("下载服务端"), 70,
-               QStringLiteral("已存在 %1，跳过下载").arg(record->jarName));
-        return true;
+        if (verifyJarIntegrity(*record, target, nullptr)) {
+            report(progress, QStringLiteral("下载服务端"), 70,
+                   QStringLiteral("已存在 %1，完整性校验通过").arg(record->jarName));
+            return true;
+        }
+        QFile::remove(target);
     }
 
     const QString reportUrl = record->jarUrl;
@@ -92,13 +129,17 @@ bool ServerInstaller::downloadJar(ServerRecord *record, QString *error, const In
                 report(progress, QStringLiteral("下载服务端"), 45 + percent / 4,
                        QStringLiteral("已下载 %1%").arg(percent));
             }
-        });
+        }, 900000, record->jarSize > 0 ? record->jarSize : 4LL * 1024 * 1024 * 1024);
     if (!ok)
         return false;
     // A jar is a zip; a redirect/CDN error page (or a truncated download) is not.
     if (QFileInfo(target).size() < 1024 || !Archive::isZipArchive(target)) {
         if (error)
             *error = QStringLiteral("下载到的服务端文件异常（过小或不是 jar/zip），请检查网络或代理设置");
+        QFile::remove(target);
+        return false;
+    }
+    if (!verifyJarIntegrity(*record, target, error)) {
         QFile::remove(target);
         return false;
     }
@@ -277,6 +318,9 @@ Result ServerInstaller::install(ServerStore &store,
                                     resolveError);
             }
             record.jarUrl = resolved.jarUrl;
+            record.sha1 = resolved.sha1;
+            record.sha256 = resolved.sha256;
+            record.jarSize = resolved.sizeBytes;
             record.jarName = QStringLiteral("server.jar");
             record.build = resolved.build;
             record.javaMajor = request.javaMajor > 0 ? request.javaMajor : resolved.javaMajor;
@@ -343,7 +387,7 @@ Result ServerInstaller::install(ServerStore &store,
     }
 
     report(progress, QStringLiteral("完成"), 100, QStringLiteral("服务器已就绪"));
-    Result result = Result::ok(record.toJson());
+    Result result = Result::ok(record.toJson(true));
     for (const QString &warning : warningList)
         result.warn(warning);
     return result;

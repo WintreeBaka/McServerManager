@@ -38,9 +38,10 @@ QString ProcessResult::errorText() const
 
 ProcessResult ProcessRunner::run(const QString &program,
                                  const QStringList &arguments,
-                                 int timeoutMs,
-                                 const QByteArray &stdinData,
-                                 const QString &workingDirectory)
+                             int timeoutMs,
+                             const QByteArray &stdinData,
+                             const QString &workingDirectory,
+                             const QProcessEnvironment &environment)
 {
     ProcessResult result;
     result.program = program;
@@ -51,6 +52,8 @@ ProcessResult ProcessRunner::run(const QString &program,
     process.setArguments(arguments);
     if (!workingDirectory.isEmpty())
         process.setWorkingDirectory(workingDirectory);
+    if (!environment.isEmpty())
+        process.setProcessEnvironment(environment);
     process.setProcessChannelMode(QProcess::SeparateChannels);
     Logger::debug(QStringLiteral("process"),
                   QStringLiteral("exec: %1 %2 (cwd=%3)")

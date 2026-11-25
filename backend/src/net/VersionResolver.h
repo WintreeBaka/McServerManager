@@ -13,6 +13,9 @@ struct ResolvedServer
     QString build;        // 496 (paper build / purpur build / fabric loader)
     QString jarUrl;       // direct download url
     QString jarName;      // server.jar
+    QString sha1;         // upstream integrity hash when published
+    QString sha256;
+    qint64 sizeBytes = 0;
     int javaMajor = 17;
     QString channel;      // default / experimental
     QString releaseTime;  // ISO timestamp (vanilla manifest)

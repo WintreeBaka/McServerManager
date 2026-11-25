@@ -18,7 +18,7 @@
 
 ```powershell
 # 只装了命令行版的机器（发行包 McServerManager-<版本>-win64-cli.zip 里只有 mcsm-cli.exe）
-mcsm-cli plugin package install --zip dist\plugins\com.mcsm.container-porter.cli-1.0.0.zip
+mcsm-cli plugin package install --zip dist\plugins\com.mcsm.container-porter.cli-1.1.0.zip
 mcsm-cli plugin package info --name com.mcsm.container-porter.cli
 ```
 
@@ -41,9 +41,15 @@ mcsm-cli plugin call --name com.mcsm.container-porter.cli --method scan
 # 导入（路径要 encodeURIComponent 编码）
 mcsm-cli plugin call --name com.mcsm.container-porter.cli --method "import~D%3A%5Cbackup%5Csurvival-20261117-200000.tar"
 
+# 非本机包载入镜像 / 使用 host 运行时时必须显式确认
+mcsm-cli plugin call --name com.mcsm.container-porter.cli --method "import~D%3A%5Cbackup%5Csurvival-20261117-200000.tar~allowHost=1&allowUntrustedImage=1"
+
 # 打开导出目录（在 Windows 资源管理器里）
 mcsm-cli plugin call --name com.mcsm.container-porter.cli --method open-folder
 ```
+
+容器包默认不包含原 RCON 密码，导入时会生成新密码。容器包仍可能包含世界、日志和插件，
+属于敏感资产。路径中的 `~` 需要编码为 `%7E`。
 
 导入会直接写 `<数据目录>/servers.json`，所以下一次 `mcsm-cli server list` 就能看到新服务器；
 如果桌面管理器正好开着，它会在约 5 秒内自动刷新出来。

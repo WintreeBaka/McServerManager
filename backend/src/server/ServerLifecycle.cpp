@@ -261,7 +261,7 @@ bool configPendingBackup(const ServerRecord &record)
 
 QJsonObject ServerLifecycle::status(const ServerRecord &record, bool withStats)
 {
-    QJsonObject object = record.toJson();
+    QJsonObject object = record.toJson(true);
     const QString state = runtimeState(record);
     object.insert(QStringLiteral("status"), state);
     object.insert(QStringLiteral("containerState"), DockerManager::containerState(record.id));

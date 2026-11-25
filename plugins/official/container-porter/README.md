@@ -12,7 +12,7 @@
 | 完整版（本目录） | `com.mcsm.container-porter` | `global`（前端 + 后端） | 桌面管理器，左侧导航多出「导入与导出」页面 |
 | [CLI 版](../container-porter-cli/) | `com.mcsm.container-porter.cli` | `backend`（只有后端） | 只装了 `mcsm-cli` 的机器、服务器主机、脚本 / CI |
 
-两版当前都是 **1.0.0**（正式版）。
+两版当前都是 **1.1.0**，要求管理器 **1.2.3 或更高**。
 
 两个包的**后端是同一份代码**，导出的 `.tar` 容器包格式一致、可以互相导入；差别只是 CLI 版没有
 `frontend/` 目录，也没有「导入与导出」页面，所有操作通过 `mcsm-cli plugin call` 完成。
@@ -29,7 +29,8 @@
   包会大很多（等于镜像体积），但目标机器就算没有同名镜像也能直接跑。
 * **完整导出（含备份）** —— 再加上 `backups/` 与 `logs/`。
 * **选择容器包导入…** —— 先弹出文件选择框挑一个 `.tar` 包，再解开、把数据放到新的服务器目录，
-  自动分配新的 id / 端口，并把服务器**直接加入服务器列表**（约 5 秒内界面就会刷新出来）。
+  自动分配新的 id / 端口，并把服务器**直接加入服务器列表**。非本机导出的镜像或声明
+  `runtime: "host"` 的包会先显示二次确认，不会静默执行。
 
 导出时**先选保存位置再导出**：勾选一台会弹出「另存为」（可以直接改文件名）；
 勾选多台会弹出「选择文件夹」，每台各生成一个包。取消对话框不会导出任何东西。
@@ -52,11 +53,18 @@ image.tar        可选，docker save 出来的镜像（只有「含容器镜像
 
 导入时：
 
-* 若包里有 `image.tar`，先 `docker load` 载入镜像，记录的 `image` 指向它；
+* 若包里有 `image.tar`，来自其他管理器实例时必须由管理员确认后才会 `docker load`；
+* `runtime: "host"` 必须由管理员明确批准；未批准的包不会静默以主机 JDK 运行；
 * 否则沿用记录里的镜像名，服务器第一次启动时管理器会自动 `docker pull`；
 * 端口若与现有服务器冲突，会换成空闲端口，并同步改写 `server.properties`
   里的 `server-port` / `rcon.port`；
+* RCON 密码不会随包导出，导入时会重新生成随机密码并写回配置；
 * 名称重复时自动加「（导入）」后缀。
+
+容器包默认不带原 RCON 密码。manifest 只保留白名单中的服务器字段，`jdkHome`、
+`extraJavaOptions` 等主机相关字段会被丢弃。容器包仍可能包含世界、日志和插件，
+属于**敏感资产**，不要公开分享；`完整导出（含备份）` 可能包含历史 `server.properties`，
+其中旧 RCON 密码需要按凭据保护。
 
 ## 手动调用（命令行）
 
@@ -72,10 +80,14 @@ mcsm-cli plugin call --name com.mcsm.container-porter --method scan
 
 # 导入（路径需要 encodeURIComponent 编码）
 mcsm-cli plugin call --name com.mcsm.container-porter --method "import~D%3A%5Cdata%5Csurvival-20261116-200000.tar"
+
+# 确认导入非本机包，并允许镜像 / host 运行时
+mcsm-cli plugin call --name com.mcsm.container-porter --method "import~D%3A%5Cdata%5Csurvival-20261116-200000.tar~allowHost=1&allowUntrustedImage=1"
 ```
 
 参数编码进方法名，是为了绕开 `plugin call` 命令行里 JSON 引号被解析掉的问题。
 省略目标路径时，包会落在默认导出目录。
+路径中的 `~` 必须编码为 `%7E`。
 
 ## 限制与注意
 
@@ -83,6 +95,7 @@ mcsm-cli plugin call --name com.mcsm.container-porter --method "import~D%3A%5Cda
 * 导出运行中的容器时，`docker commit` 会捕获容器内部的文件变动，但 `/data` 是 bind mount，
   世界数据来自服务器目录（`data.tar`），两者会一起打包。
 * 不含 `backups/` 与 `logs/`，除非用「完整导出」。
+* 导出的 manifest 带本机插件实例标识。只接受同实例导出的包自动导入镜像；其他来源必须确认。
 * 导入会直接读写 `<数据目录>/servers.json`；如果此时正好有别的操作在写注册表，
   极小概率会被覆盖，建议导入时不要在管理器里同时启停服务器。
 * 端口只检查管理器已知的服务器，不检查宿主机其它程序占用的端口。

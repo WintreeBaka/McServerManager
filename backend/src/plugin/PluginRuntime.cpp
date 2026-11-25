@@ -1,5 +1,6 @@
 #include "plugin/PluginRuntime.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -272,6 +273,7 @@ PluginCallOutcome PluginRuntime::call(const PluginManifest &manifest,
     request.insert(QStringLiteral("pluginsDir"), AppPaths::pluginsDir());
     request.insert(QStringLiteral("dataDir"), AppPaths::pluginDataDir(manifest.id));
     request.insert(QStringLiteral("requestedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
+    request.insert(QStringLiteral("managerVersion"), QCoreApplication::applicationVersion());
 
     const QByteArray payload = QJsonDocument(request).toJson(QJsonDocument::Compact) + "\n";
     const int effectiveTimeout =
@@ -279,8 +281,12 @@ PluginCallOutcome PluginRuntime::call(const PluginManifest &manifest,
 
     QElapsedTimer timer;
     timer.start();
+    QProcessEnvironment pluginEnvironment = QProcessEnvironment::systemEnvironment();
+    pluginEnvironment.insert(QStringLiteral("MCSM_BACKEND"), QCoreApplication::applicationFilePath());
+    pluginEnvironment.insert(QStringLiteral("MCSM_HOME"), AppPaths::root());
+    pluginEnvironment.insert(QStringLiteral("MCSM_MANAGER_VERSION"), QCoreApplication::applicationVersion());
     const ProcessResult result = ProcessRunner::run(launch.program, launch.arguments, effectiveTimeout,
-                                                    payload, launch.workingDirectory);
+                                                    payload, launch.workingDirectory, pluginEnvironment);
     outcome.elapsedMs = timer.elapsed();
     outcome.exitCode = result.exitCode;
 
@@ -382,8 +388,31 @@ Result PluginRuntime::notify(const QString &hook, const QJsonObject &payload)
 
 QJsonObject PluginRuntime::serverPayload(const ServerRecord &record, const QJsonObject &extra)
 {
+    QJsonObject server;
+    server.insert(QStringLiteral("id"), record.id);
+    server.insert(QStringLiteral("name"), record.name);
+    server.insert(QStringLiteral("type"), record.type);
+    server.insert(QStringLiteral("mcVersion"), record.mcVersion);
+    server.insert(QStringLiteral("build"), record.build);
+    server.insert(QStringLiteral("jarName"), record.jarName);
+    server.insert(QStringLiteral("image"), record.image);
+    server.insert(QStringLiteral("runtime"), record.runtime);
+    server.insert(QStringLiteral("memory"), record.memory);
+    server.insert(QStringLiteral("memoryLimit"), record.memoryLimit);
+    server.insert(QStringLiteral("port"), record.port);
+    server.insert(QStringLiteral("rconPort"), record.rconPort);
+    server.insert(QStringLiteral("motd"), record.motd);
+    server.insert(QStringLiteral("levelName"), record.levelName);
+    server.insert(QStringLiteral("status"), record.status);
+    server.insert(QStringLiteral("eulaAccepted"), record.eulaAccepted);
+    server.insert(QStringLiteral("autoRestart"), record.autoRestart);
+    server.insert(QStringLiteral("autoStart"), record.autoStart);
+    server.insert(QStringLiteral("manualInstall"), record.manualInstall);
+    server.insert(QStringLiteral("createdAt"), record.createdAt.toString(Qt::ISODate));
+    server.insert(QStringLiteral("lastStartAt"), record.lastStartAt.toString(Qt::ISODate));
+    server.insert(QStringLiteral("lastBackupAt"), record.lastBackupAt.toString(Qt::ISODate));
     QJsonObject payload;
-    payload.insert(QStringLiteral("server"), record.toJson());
+    payload.insert(QStringLiteral("server"), server);
     payload.insert(QStringLiteral("serverDir"), record.dir);
     payload.insert(QStringLiteral("timestamp"), QDateTime::currentDateTime().toString(Qt::ISODate));
     for (auto it = extra.constBegin(); it != extra.constEnd(); ++it)
@@ -545,6 +574,9 @@ Result PluginRuntime::serviceStart(const QString &pluginId)
     environment.insert(QStringLiteral("MCSM_PLUGIN_ID"), manifest.id);
     environment.insert(QStringLiteral("MCSM_PLUGIN_DIR"), manifest.path);
     environment.insert(QStringLiteral("MCSM_PLUGIN_DATA"), AppPaths::pluginDataDir(manifest.id));
+    environment.insert(QStringLiteral("MCSM_BACKEND"), QCoreApplication::applicationFilePath());
+    environment.insert(QStringLiteral("MCSM_HOME"), AppPaths::root());
+    environment.insert(QStringLiteral("MCSM_MANAGER_VERSION"), QCoreApplication::applicationVersion());
     if (port > 0)
         environment.insert(QStringLiteral("MCSM_PLUGIN_PORT"), QString::number(port));
     process.setProcessEnvironment(environment);

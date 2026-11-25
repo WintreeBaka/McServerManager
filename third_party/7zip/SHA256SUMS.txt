@@ -1,0 +1,18 @@
+7-Zip 26.06 - official release integrity data
+============================================================
+
+Official release:
+https://github.com/ip7z/7zip/releases/tag/26.06
+
+Release asset digest published by the upstream release:
+396c180f12d2247c24b0b1fcd482c6fc2a2700f61211ffede1061dd971f5e104  7z2606-extra.7z
+
+Bundled x64 console binary (extracted from x64/7za.exe):
+dd3757f31c97e33776f2590317d4fb12f2da075db3dbb1e3f94d0f2a01d84ffa  *7za.exe
+
+Upgrade procedure:
+1. Download the official 7z<version>-extra.7z asset from ip7z/7zip Releases.
+2. Verify the asset against the sha256 digest shown by GitHub for that asset.
+3. Extract x64/7za.exe, readme.txt, history.txt and License.txt.
+4. Replace the files in this directory and update this file.
+5. Run tools/verify-third-party.ps1 and the complete release pipeline.

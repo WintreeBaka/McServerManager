@@ -7,18 +7,18 @@
         $env:GITHUB_TOKEN = "ghp_xxx"
         .\tools\create-release.ps1
 
-    默认行为（1.2.2）：
-        tag     : v1.2.2
-        说明    : docs\RELEASE_NOTES-1.2.2.md
-        附件    : dist\McServerManager-1.2.2-win64.zip         （GUI 便携版）
-                  dist\McServerManager-1.2.2-win64-cli.zip     （纯 CLI 精简版）
+    默认行为（1.2.3）：
+        tag     : v1.2.3
+        说明    : docs\RELEASE_NOTES-1.2.3.md
+        附件    : dist\McServerManager-1.2.3-win64.zip         （GUI 便携版）
+                  dist\McServerManager-1.2.3-win64-cli.zip     （纯 CLI 精简版）
                   docs\PLUGIN-SDK.md                           （接口文档）
-                  dist\plugins\com.mcsm.player-admin-1.0.0.zip （官方玩家管理插件）
+                  dist\plugins\com.mcsm.player-admin-1.1.0.zip （官方玩家管理插件）
 
     已存在同名 Release 时会复用并补传缺失的附件，不会重复创建。
 #>
 param(
-    [string]$Version = "1.2.2",
+    [string]$Version = "1.2.3",
     [string]$Repo = "WintreeBaka/McServerManager",
     [string]$Tag = "",
     [string]$Title = "",
@@ -41,7 +41,7 @@ if ($Assets.Count -eq 0) {
         "dist\McServerManager-$Version-win64.zip",
         "dist\McServerManager-$Version-win64-cli.zip",
         "docs\PLUGIN-SDK.md",
-        "dist\plugins\com.mcsm.player-admin-1.0.0.zip"
+        "dist\plugins\com.mcsm.player-admin-1.1.0.zip"
     )
 }
 

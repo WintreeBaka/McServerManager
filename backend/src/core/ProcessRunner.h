@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 
@@ -29,7 +30,8 @@ public:
                              const QStringList &arguments,
                              int timeoutMs = 120000,
                              const QByteArray &stdinData = QByteArray(),
-                             const QString &workingDirectory = QString());
+                             const QString &workingDirectory = QString(),
+                             const QProcessEnvironment &environment = QProcessEnvironment());
 
     static bool startDetachedOk(const QString &program,
                                 const QStringList &arguments,

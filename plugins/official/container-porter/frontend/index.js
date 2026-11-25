@@ -23,10 +23,16 @@
     var bundles = [];
     var exportDir = "";
     var lastCount = -1;
+    var pendingImport = "";
     var lastResult = "操作结果会显示在这里。导入完成后，服务器列表会在几秒内自动刷新。";
 
     function command(method) {
         return "plugin call --name " + pluginId + " --method " + method;
+    }
+
+    function encodeToken(value) {
+        return encodeURIComponent(String(value === undefined || value === null ? "" : value))
+            .replace(/~/g, "%7E");
     }
 
     function humanSize(bytes) {
@@ -176,7 +182,7 @@
         blocks.push({
             type: "text",
             style: "hint",
-            text: "选择任意一个 .tar 容器包（导出的包、或别人给你的包都可以），导入后会立即出现在服务器列表里。"
+            text: "只导入你信任来源的 .tar 容器包。来自其他机器的包可能包含可执行数据或容器镜像，首次导入需要再次确认；容器包属于敏感资产，不要公开分享。"
         });
         blocks.push({
             type: "buttons",
@@ -186,6 +192,20 @@
                 { label: "打开导出目录", action: "open-folder", level: "outline" }
             ]
         });
+        if (pendingImport) {
+            blocks.push({
+                type: "text",
+                style: "caption",
+                text: "待确认：" + pendingImport + "。继续会信任包内镜像（如有），并允许其声明的 host 运行时。"
+            });
+            blocks.push({
+                type: "buttons",
+                items: [
+                    { label: "确认信任并继续导入", action: "confirm-import", level: "danger" },
+                    { label: "取消本次导入", action: "cancel-import", level: "outline" }
+                ]
+            });
+        }
 
         if (bundles.length > 0) {
             var bundleRows = [];
@@ -220,7 +240,7 @@
         var inner = (reply && reply.data) || {};
         if (inner.ok) return { ok: true, data: inner.data || {} };
         var error = inner.error || {};
-        return { ok: false, message: error.message || (reply && reply.error) || "未知错误" };
+        return { ok: false, code: error.code || "", message: error.message || (reply && reply.error) || "未知错误" };
     }
 
     function invoke(method, callback) {
@@ -262,8 +282,8 @@
         // 单台导出时对话框要的是文件名，用户可能没写扩展名。
         if (selection.length === 1 && !/\.tar$/i.test(target)) target += ".tar";
         log(label + "：" + names + " …");
-        var method = "export~" + selection.map(encodeURIComponent).join(",")
-            + "~" + mode + "~" + encodeURIComponent(target);
+        var method = "export~" + selection.map(encodeToken).join(",")
+            + "~" + mode + "~" + encodeToken(target);
         invoke(method, function (result) {
             if (!result.ok) {
                 mcsm.toast("导出失败：" + result.message, "error");
@@ -281,15 +301,24 @@
         });
     }
 
-    function doImport(info) {
+    function doImport(info, confirmed) {
         var file = String((info && info.path) || "");
         if (!file) {
             log("导入：已取消（没有选择文件）。");
             return;
         }
+        pendingImport = "";
         log("导入中：" + file + " …");
-        invoke("import~" + encodeURIComponent(file), function (result) {
+        var method = "import~" + encodeToken(file);
+        if (confirmed) method += "~allowHost=1&allowUntrustedImage=1";
+        invoke(method, function (result) {
             if (!result.ok) {
+                if (result.code === "IMPORT_CONFIRM_REQUIRED") {
+                    pendingImport = file;
+                    mcsm.toast("该容器包需要额外确认", "warn");
+                    log(result.message + " 未执行导入。");
+                    return;
+                }
                 mcsm.toast("导入失败：" + result.message, "error");
                 log("导入失败：" + result.message);
                 return;
@@ -308,6 +337,13 @@
     mcsm.ui.onAction(pageId, "export-image", function (info) { doExport(1, "导出（含容器镜像）", info); });
     mcsm.ui.onAction(pageId, "export-full", function (info) { doExport(2, "完整导出（含备份）", info); });
     mcsm.ui.onAction(pageId, "import-pick", doImport);
+    mcsm.ui.onAction(pageId, "confirm-import", function () {
+        if (pendingImport) doImport({ path: pendingImport }, true);
+    });
+    mcsm.ui.onAction(pageId, "cancel-import", function () {
+        pendingImport = "";
+        log("已取消本次导入。");
+    });
     mcsm.ui.onAction(pageId, "rescan", scan);
     mcsm.ui.onAction(pageId, "open-folder", function () {
         invoke("open-folder", function (result) {

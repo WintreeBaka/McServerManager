@@ -7,7 +7,7 @@
 #     .\tools\package-release.ps1
 #     .\tools\package-release.ps1 -Flavor with-plugins             # 追加示例插件包
 #     .\tools\package-release.ps1 -Flavor with-container-porter    # 附带官方插件「容器搬运工」
-#     .\tools\package-release.ps1 -Version 1.2.2 -DistDir dist
+#     .\tools\package-release.ps1 -Version 1.2.3 -DistDir dist
 #
 # Flavours deliberately get different folder names:
 #     McServerManager-<版本>-win64                        含 GUI 的便携版
@@ -17,7 +17,7 @@
 param(
     [string]$BinDir = "build\bin",
     [string]$DistDir = "dist",
-    [string]$Version = "1.2.2",
+    [string]$Version = "1.2.3",
     [ValidateSet("plain", "with-plugins", "with-container-porter", "cli")]
     [string]$Flavor = "plain",
     [string]$QtBin = "D:\qt\6.11.2\mingw_64\bin",
@@ -25,6 +25,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+& (Join-Path $PSScriptRoot "verify-third-party.ps1")
 
 if (-not (Test-Path (Join-Path $BinDir "mcsm-cli.exe"))) {
     throw "missing $BinDir\mcsm-cli.exe - build the backend first"
@@ -89,6 +91,12 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stage "7zip") | Out-Null
 Copy-Item $sevenZip -Destination (Join-Path $stage "7zip") -Force
 if (Test-Path "third_party\7zip\LICENSE-7zip.txt") {
     Copy-Item "third_party\7zip\LICENSE-7zip.txt" -Destination (Join-Path $stage "7zip") -Force
+}
+foreach ($notice in @("SHA256SUMS.txt", "readme.txt", "history.txt")) {
+    $source = Join-Path "third_party\7zip" $notice
+    if (Test-Path $source) {
+        Copy-Item $source -Destination (Join-Path $stage "7zip") -Force
+    }
 }
 
 # "with-plugins" flavour: ship the ready to import example plugin packages so a

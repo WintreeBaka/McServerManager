@@ -1,5 +1,33 @@
 # 更新日志
 
+## 1.2.3（2026-11-25）
+
+### 信任链与凭据
+
+* container-porter 导入不再整体信任 manifest：服务器记录按安全字段白名单重建，
+  `jdkHome`、启动参数等主机字段不会生效；`runtime: "host"` 必须管理员明确批准。
+* 非本机导出的容器镜像在 `docker load` 前要求二次确认；导入包带来源实例标识。
+* 容器包默认剔除 RCON 密码，导出时重写顶层 `server.properties`；导入时重新生成密码。
+* `server get` / `server list` / 安装与更新结果不再返回 `rconPassword`；
+  插件钩子负载改为安全字段白名单。
+* player-admin 改为使用受控 `mcsm-cli server command` 通道，不再读取或持有 RCON 密码。
+* `servers.json` 写入后收窄为当前用户权限；配置备份和世界备份的敏感属性已写入文档。
+
+### 备份与下载安全
+
+* 备份删除只接受 backups 目录内的 `.tar.gz` / `.zip` 文件名，拒绝绝对路径和 `..`。
+* zip 恢复统一走 `Archive::extractZip`；tar 恢复预检路径、符号链接和硬链接。
+* 备份成功只在命令成功且归档大小有效时成立，失败残留会被删除。
+* HTTP 请求与下载增加 HTTPS（本机回环例外）、逐跳重定向校验和大小上限。
+* Mojang / Paper 服务端下载校验上游 SHA-1/SHA-256 与大小；Modrinth 插件校验 SHA-1/SHA-512 与大小。
+* 插件 `--url` 直装路径恢复可用并强制 HTTPS；版本解析中的 Minecraft 版本会正确 URL 编码。
+
+### 工具链
+
+* 内置 7-Zip 升级为官方 26.06 x64，并加入 `SHA256SUMS.txt`、
+  `tools/verify-third-party.ps1`、打包前校验和 CI 校验步骤。
+* 容器搬运工清理陈旧临时目录、修正 `~` 参数分隔、错误详情不再向调用方返回堆栈。
+
 ## 1.2.2（2026-11-24）
 
 ### 安全

@@ -21,6 +21,9 @@ struct PluginHit
     QString pageUrl;
     QString downloadUrl;
     QString fileName;
+    QString sha1;
+    QString sha512;
+    qint64 expectedSize = 0;
     QString versionName;
     qint64 downloads = 0;
     bool installable = true;

@@ -42,6 +42,9 @@ ServerRecord ServerRecord::fromJson(const QJsonObject &object)
     record.build = Json::str(object, QStringLiteral("build"));
     record.jarName = Json::str(object, QStringLiteral("jarName"), QStringLiteral("server.jar"));
     record.jarUrl = Json::str(object, QStringLiteral("jarUrl"));
+    record.sha1 = Json::str(object, QStringLiteral("sha1"));
+    record.sha256 = Json::str(object, QStringLiteral("sha256"));
+    record.jarSize = Json::bigint(object, QStringLiteral("jarSize"));
     record.javaMajor = Json::integer(object, QStringLiteral("javaMajor"), 17);
     record.image = Json::str(object, QStringLiteral("image"), VersionResolver::javaImage(record.javaMajor));
     record.runtime = Json::str(object, QStringLiteral("runtime"), QStringLiteral("docker"));
@@ -71,7 +74,7 @@ ServerRecord ServerRecord::fromJson(const QJsonObject &object)
     return record;
 }
 
-QJsonObject ServerRecord::toJson() const
+QJsonObject ServerRecord::toJson(bool redactSecrets) const
 {
     QJsonObject object;
     object.insert(QStringLiteral("id"), id);
@@ -81,6 +84,9 @@ QJsonObject ServerRecord::toJson() const
     object.insert(QStringLiteral("build"), build);
     object.insert(QStringLiteral("jarName"), jarName);
     object.insert(QStringLiteral("jarUrl"), jarUrl);
+    object.insert(QStringLiteral("sha1"), sha1);
+    object.insert(QStringLiteral("sha256"), sha256);
+    object.insert(QStringLiteral("jarSize"), double(jarSize));
     object.insert(QStringLiteral("javaMajor"), javaMajor);
     object.insert(QStringLiteral("image"), image);
     object.insert(QStringLiteral("runtime"), runtime);
@@ -90,7 +96,8 @@ QJsonObject ServerRecord::toJson() const
     object.insert(QStringLiteral("extraJavaOptions"), extraJavaOptions);
     object.insert(QStringLiteral("port"), port);
     object.insert(QStringLiteral("rconPort"), rconPort);
-    object.insert(QStringLiteral("rconPassword"), rconPassword);
+    if (!redactSecrets)
+        object.insert(QStringLiteral("rconPassword"), rconPassword);
     object.insert(QStringLiteral("motd"), motd);
     object.insert(QStringLiteral("levelName"), levelName);
     object.insert(QStringLiteral("dir"), dir);

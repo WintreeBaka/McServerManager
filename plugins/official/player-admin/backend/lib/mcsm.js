@@ -10,7 +10,7 @@
  *   2. 读取服务器记录与服务器目录里的名单文件
  *      （whitelist.json / ops.json / banned-players.json / usercache.json /
  *        server.properties）
- *   3. 一个纯 Node 的 RCON 客户端（不依赖 mcsm-cli，也不依赖 Docker）
+ *   3. 通过管理器注入的 mcsm-cli 受控通道执行 RCON 命令（不接触密码）
  *   4. 具体的玩家操作：踢出 / 封禁 / 解封 / OP / 白名单 / 标题 / 私信 / 模式 …
  *
  * 设计约定：
@@ -22,11 +22,10 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const net = require("net");
 const crypto = require("crypto");
 const https = require("https");
+const { execFile } = require("child_process");
 
-const RCON_HOST = "127.0.0.1";
 const RCON_TIMEOUT_MS = 6000;
 
 /// 本插件自己的 id（用于定位数据目录里的文案文件）。
@@ -356,125 +355,62 @@ function readJsonText(text) {
 
 // ------------------------------------------------------------------ RCON ----
 
-function buildPacket(id, type, text) {
-    const body = Buffer.from(text, "utf8");
-    const packet = Buffer.alloc(14 + body.length);
-    packet.writeInt32LE(body.length + 10, 0);
-    packet.writeInt32LE(id, 4);
-    packet.writeInt32LE(type, 8);
-    body.copy(packet, 12);
-    packet.writeInt8(0, 12 + body.length);
-    packet.writeInt8(0, 13 + body.length);
-    return packet;
-}
-
-/// 发一条 RCON 指令并返回文本响应。失败时 reject(Error)。
-async function rconExec(record, command, options) {
-    const opts = options || {};
-    const host = opts.host || RCON_HOST;
-    const port = opts.port || record.rconPort || 25575;
-    const password = opts.password !== undefined ? opts.password : (record.rconPassword || "");
-    const timeoutMs = opts.timeoutMs || RCON_TIMEOUT_MS;
-
+function runCli(root, args, timeoutMs) {
     return new Promise((resolve, reject) => {
-        let settled = false;
-        let buffer = Buffer.alloc(0);
-        let authenticated = false;
-        let finishTimer = null;
-        const chunks = [];
-
-        const socket = net.connect({ host, port });
-        socket.setNoDelay(true);
-
-        const overall = setTimeout(() => {
-            finish(new Error("RCON 超时（" + timeoutMs + "ms），请确认服务器已启动且 enable-rcon=true"));
-        }, timeoutMs);
-
-        function finish(error, value) {
-            if (settled) {
+        const backend = process.env.MCSM_BACKEND;
+        if (!backend) {
+            reject(new Error("管理器没有提供受控后端路径（MCSM_BACKEND）"));
+            return;
+        }
+        execFile(backend, ["--home", root].concat(args), {
+            windowsHide: true,
+            timeout: timeoutMs,
+            maxBuffer: 2 * 1024 * 1024,
+            encoding: "utf8"
+        }, (error, stdout, stderr) => {
+            const lines = String(stdout || "").trim().split(/\r?\n/).reverse();
+            let reply = null;
+            for (const line of lines) {
+                try {
+                    const parsed = JSON.parse(line);
+                    if (parsed && Object.prototype.hasOwnProperty.call(parsed, "ok")) {
+                        reply = parsed;
+                        break;
+                    }
+                } catch (ignored) {
+                    // 继续寻找最后一条 JSON envelope
+                }
+            }
+            if (!reply) {
+                reject(new Error((error && error.message) || String(stderr || "").trim()
+                    || "mcsm-cli 没有返回 JSON 结果"));
                 return;
             }
-            settled = true;
-            clearTimeout(overall);
-            if (finishTimer) {
-                clearTimeout(finishTimer);
+            if (!reply.ok) {
+                const info = reply.error || {};
+                reject(new Error(info.message || info.detail || "mcsm-cli 命令失败"));
+                return;
             }
-            try { socket.destroy(); } catch (ignored) { /* 关闭失败无需处理 */ }
-            if (error) {
-                reject(error);
-            } else {
-                resolve(value);
-            }
-        }
-
-        socket.on("connect", () => {
-            socket.write(buildPacket(1, 3, password));
-        });
-
-        socket.on("error", (error) => {
-            finish(new Error("无法连接 RCON " + host + ":" + port + "（" + error.message +
-                             "），服务器可能没有运行"));
-        });
-
-        socket.on("close", () => {
-            if (chunks.length) {
-                finish(null, chunks.join(""));
-            } else {
-                finish(new Error("RCON 连接已关闭，未收到响应"));
-            }
-        });
-
-        socket.on("data", (data) => {
-            buffer = Buffer.concat([buffer, data]);
-            for (;;) {
-                if (buffer.length < 4) {
-                    return;
-                }
-                const length = buffer.readInt32LE(0);
-                if (length < 10 || length > 1024 * 1024) {
-                    finish(new Error("RCON 报文长度异常：" + length));
-                    return;
-                }
-                if (buffer.length < 4 + length) {
-                    return;
-                }
-                const payload = buffer.subarray(4, 4 + length);
-                buffer = buffer.subarray(4 + length);
-                const id = payload.readInt32LE(0);
-                const type = payload.readInt32LE(4);
-                const body = payload.subarray(8, payload.length - 2).toString("utf8");
-
-                if (!authenticated) {
-                    if (id === -1) {
-                        finish(new Error("RCON 密码错误"));
-                        return;
-                    }
-                    authenticated = true;
-                    socket.write(buildPacket(2, 2, command));
-                    continue;
-                }
-
-                // 指令响应是 type=0；部分实现会先补一个空的 type=2 报文，忽略之。
-                if (type === 0 || (type === 2 && body.length > 0)) {
-                    if (body.length) {
-                        chunks.push(body);
-                    }
-                    if (finishTimer) {
-                        clearTimeout(finishTimer);
-                    }
-                    // 长响应会被拆成多个报文，等一小段空闲再收尾。
-                    finishTimer = setTimeout(() => finish(null, chunks.join("")), 120);
-                }
-            }
+            resolve(reply.data || {});
         });
     });
 }
 
+/// 通过受控 CLI 通道发送 RCON 指令；插件本身永远拿不到密码。
+async function rconExec(root, record, command, options) {
+    const opts = options || {};
+    const timeoutMs = opts.timeoutMs || RCON_TIMEOUT_MS;
+    const data = await runCli(root, [
+        "server", "command", "--id", record.id, "--command", command
+    ], timeoutMs);
+    return String(data.response || "");
+}
+
 /// RCON 是否能连上（用于判断服务器是否真的在跑，而不是只看 servers.json 的 status）。
-async function probe(record, options) {
+async function probe(root, record, options) {
     const opts = Object.assign({ timeoutMs: 2500 }, options || {});
     try {
-        const response = await rconExec(record, "list", opts);
+        const response = await rconExec(root, record, "list", opts);
         return { ok: true, response: response };
     } catch (error) {
         return { ok: false, error: error.message };
@@ -609,14 +545,14 @@ async function performAction(root, record, action, player, value, value2, option
 
     let online = null;
     try {
-        online = await probe(record);
+        online = await probe(root, record);
     } catch (error) {
         online = { ok: false, error: String(error) };
     }
     const running = online.ok;
 
     async function rcon(command) {
-        const response = await rconExec(record, command);
+        const response = await rconExec(root, record, command);
         return response;
     }
 
@@ -810,7 +746,7 @@ async function buildDashboard(root, want, options) {
     let online = { names: [], count: 0, max: null };
     let rcon = { ok: false, error: "" };
     try {
-        online = parseListResponse(await rconExec(record, "list", opts));
+        online = parseListResponse(await rconExec(root, record, "list", opts));
         rcon = { ok: true, error: "" };
     } catch (error) {
         rcon = { ok: false, error: error.message };
