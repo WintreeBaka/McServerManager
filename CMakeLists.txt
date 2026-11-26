@@ -14,7 +14,16 @@ if(MSVC)
     add_compile_options(/utf-8 /permissive- /W4 /guard:cf)
     add_link_options(/guard:cf)
 elseif(MINGW)
-    add_compile_options(-fstack-protector-strong -D_FORTIFY_SOURCE=2)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_FLAGS "-O2 -fstack-protector-strong")
+    check_cxx_source_compiles(
+        "int main() { volatile char buffer[16]; buffer[0] = 1; return buffer[0]; }"
+        MCSM_MINGW_HAS_STACK_PROTECTOR)
+    unset(CMAKE_REQUIRED_FLAGS)
+    add_compile_options(-D_FORTIFY_SOURCE=2)
+    if(MCSM_MINGW_HAS_STACK_PROTECTOR)
+        add_compile_options(-fstack-protector-strong)
+    endif()
     add_link_options(-Wl,--dynamicbase -Wl,--nxcompat -Wl,--high-entropy-va)
 endif()
 
