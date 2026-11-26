@@ -5,6 +5,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLockFile>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QSet>
 
 #ifdef Q_OS_WIN
@@ -21,6 +23,8 @@
 
 namespace mcsm {
 namespace {
+
+QMutex s_registryMutex;
 
 bool restrictRegistryPermissions(const QString &path)
 {
@@ -91,7 +95,7 @@ ServerStore::ServerStore(const QString &registryPath)
     reload();
 }
 
-bool ServerStore::reload()
+bool ServerStore::reloadFile(QString *error)
 {
     QFile file(m_path);
     m_lastError.clear();
@@ -100,6 +104,8 @@ bool ServerStore::reload()
     if (!file.open(QIODevice::ReadOnly)) {
         Logger::error(QStringLiteral("store"), QStringLiteral("cannot read %1").arg(m_path));
         m_lastError = QStringLiteral("无法读取 %1").arg(m_path);
+        if (error)
+            *error = m_lastError;
         return false;
     }
     const QByteArray raw = file.readAll();
@@ -128,6 +134,8 @@ bool ServerStore::reload()
                           .arg(parseError.errorString(), backup));
         m_lastError = QStringLiteral("servers.json 无法解析（%1），已备份到 %2")
                           .arg(parseError.errorString(), backup);
+        if (error)
+            *error = m_lastError;
         return false;
     }
 
@@ -148,15 +156,21 @@ bool ServerStore::reload()
     return true;
 }
 
-bool ServerStore::save() const
+bool ServerStore::reload()
 {
-    // Several mcsm-cli processes (GUI requests + the backup daemon) share this
-    // file; a lock prevents two writers from interleaving read/modify/write.
+    QMutexLocker processLock(&s_registryMutex);
+    return reloadFile();
+}
+
+bool ServerStore::writeFileLocked(QString *error) const
+{
     QLockFile lock(m_path + QStringLiteral(".lock"));
     lock.setStaleLockTime(15000);
     if (!lock.tryLock(5000)) {
         Logger::error(QStringLiteral("store"),
                       QStringLiteral("could not lock %1 for writing").arg(m_path));
+        if (error)
+            *error = QStringLiteral("无法锁定 servers.json");
         return false;
     }
     QJsonArray array;
@@ -166,15 +180,71 @@ bool ServerStore::save() const
     root.insert(QStringLiteral("version"), 1);
     root.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
     root.insert(QStringLiteral("servers"), array);
-    QString error;
-    if (!Json::writeObjectFile(m_path, root, &error)) {
-        Logger::error(QStringLiteral("store"), error);
+    QString writeError;
+    if (!Json::writeObjectFile(m_path, root, &writeError)) {
+        Logger::error(QStringLiteral("store"), writeError);
+        if (error)
+            *error = QStringLiteral("无法写入 servers.json");
         return false;
     }
     if (!restrictRegistryPermissions(m_path)) {
         Logger::warn(QStringLiteral("store"),
                      QStringLiteral("could not restrict %1 to the current user").arg(m_path));
     }
+    return true;
+}
+
+bool ServerStore::save() const
+{
+    QMutexLocker processLock(&s_registryMutex);
+    return writeFileLocked();
+}
+
+bool ServerStore::transaction(const std::function<bool(QString *)> &mutation, QString *error)
+{
+    QMutexLocker processLock(&s_registryMutex);
+    QLockFile lock(m_path + QStringLiteral(".lock"));
+    lock.setStaleLockTime(15000);
+    if (!lock.tryLock(5000)) {
+        Logger::warn(QStringLiteral("store"),
+                     QStringLiteral("could not lock %1 for transaction").arg(m_path));
+        if (error)
+            *error = QStringLiteral("无法锁定 servers.json");
+        return false;
+    }
+
+    const QVector<ServerRecord> previous = m_records;
+    if (!reloadFile(error)) {
+        m_records = previous;
+        return false;
+    }
+    if (!mutation(error)) {
+        Logger::warn(QStringLiteral("store"),
+                     QStringLiteral("registry mutation rejected: %1")
+                         .arg(error ? *error : QStringLiteral("unknown validation error")));
+        m_records = previous;
+        return false;
+    }
+    // writeFileLocked acquires a second QLockFile instance, which would deadlock
+    // while the transaction lock is held. Write the validated snapshot directly.
+    QJsonArray array;
+    for (const ServerRecord &record : m_records)
+        array.append(record.toJson(false));
+    QJsonObject root;
+    root.insert(QStringLiteral("version"), 1);
+    root.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
+    root.insert(QStringLiteral("servers"), array);
+    QString writeError;
+    if (!Json::writeObjectFile(m_path, root, &writeError)) {
+        Logger::error(QStringLiteral("store"), writeError);
+        m_records = previous;
+        if (error)
+            *error = writeError;
+        return false;
+    }
+    if (!restrictRegistryPermissions(m_path))
+        Logger::warn(QStringLiteral("store"),
+                     QStringLiteral("could not restrict %1 to the current user").arg(m_path));
     return true;
 }
 
@@ -200,69 +270,47 @@ ServerRecord ServerStore::get(const QString &id) const
 
 bool ServerStore::add(const ServerRecord &record, QString *error)
 {
-    QString validation;
-    if (!record.isValid(&validation) || !validatePorts(record, &validation)) {
-        if (error)
-            *error = validation;
-        return false;
-    }
-    if (contains(record.id)) {
-        if (error)
-            *error = QStringLiteral("server id '%1' already exists").arg(record.id);
-        return false;
-    }
-    m_records.append(record);
-    if (!save()) {
-        m_records.removeLast();
-        if (error)
-            *error = QStringLiteral("无法写入 servers.json");
-        return false;
-    }
-    return true;
+    return transaction([this, &record](QString *validation) {
+        if (!record.isValid(validation) || !validatePorts(record, validation))
+            return false;
+        if (contains(record.id)) {
+            if (validation)
+                *validation = QStringLiteral("server id '%1' already exists").arg(record.id);
+            return false;
+        }
+        m_records.append(record);
+        return true;
+    }, error);
 }
 
 bool ServerStore::update(const ServerRecord &record, QString *error)
 {
-    const int index = indexOf(record.id);
-    if (index < 0) {
-        if (error)
-            *error = QStringLiteral("server '%1' not found").arg(record.id);
-        return false;
-    }
-    QString validation;
-    if (!record.isValid(&validation) || !validatePorts(record, &validation)) {
-        if (error)
-            *error = validation;
-        return false;
-    }
-    const ServerRecord previous = m_records.at(index);
-    m_records[index] = record;
-    if (!save()) {
-        m_records[index] = previous;
-        if (error)
-            *error = QStringLiteral("无法写入 servers.json");
-        return false;
-    }
-    return true;
+    return transaction([this, &record](QString *validation) {
+        const int index = indexOf(record.id);
+        if (index < 0) {
+            if (validation)
+                *validation = QStringLiteral("server '%1' not found").arg(record.id);
+            return false;
+        }
+        if (!record.isValid(validation) || !validatePorts(record, validation))
+            return false;
+        m_records[index] = record;
+        return true;
+    }, error);
 }
 
 bool ServerStore::remove(const QString &id, QString *error)
 {
-    const int index = indexOf(id);
-    if (index < 0) {
-        if (error)
-            *error = QStringLiteral("server '%1' not found").arg(id);
-        return false;
-    }
-    const ServerRecord previous = m_records.at(index);
-    m_records.removeAt(index);
-    if (!save()) {
-        m_records.insert(index, previous);
-        if (error)
-            *error = QStringLiteral("无法写入 servers.json");
-        return false;
-    }
-    return true;
+    return transaction([this, &id](QString *validation) {
+        const int index = indexOf(id);
+        if (index < 0) {
+            if (validation)
+                *validation = QStringLiteral("server '%1' not found").arg(id);
+            return false;
+        }
+        m_records.removeAt(index);
+        return true;
+    }, error);
 }
 
 bool ServerStore::validatePorts(const ServerRecord &record, QString *error) const

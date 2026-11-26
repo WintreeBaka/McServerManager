@@ -11,7 +11,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # UI strings are UTF-8; MSVC needs an explicit flag (MinGW defaults to UTF-8).
 if(MSVC)
-    add_compile_options(/utf-8 /permissive-)
+    add_compile_options(/utf-8 /permissive- /W4 /guard:cf)
+    add_link_options(/guard:cf)
+elseif(MINGW)
+    add_compile_options(-fstack-protector-strong -D_FORTIFY_SOURCE=2)
+    add_link_options(-Wl,--dynamicbase -Wl,--nxcompat -Wl,--high-entropy-va)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)

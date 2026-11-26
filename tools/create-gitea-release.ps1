@@ -15,7 +15,7 @@ param(
     [string]$BaseUrl = $env:GITEA_URL,
     [string]$Owner = "w",
     [string]$Repo = "McServerManager",
-    [string]$Version = "1.2.3",
+    [string]$Version = "",
     [string]$Tag = "",
     [string]$Title = "",
     [string]$NotesFile = "",
@@ -26,6 +26,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "script-common.ps1")
+if (-not $Version) { $Version = Get-ProjectVersion -ProjectRoot $projectRoot }
 
 if (-not $Tag) { $Tag = "v$Version" }
 if (-not $Title) { $Title = "McServerManager $Version · Windows 便携版" }
@@ -33,7 +36,9 @@ if (-not $NotesFile) { $NotesFile = "docs\RELEASE_NOTES-$Version.md" }
 if ($Assets.Count -eq 0) {
     $Assets = @(
         "dist\McServerManager-$Version-win64.zip",
+        "dist\McServerManager-$Version-win64.zip.sha256",
         "dist\McServerManager-$Version-win64-cli.zip",
+        "dist\McServerManager-$Version-win64-cli.zip.sha256",
         "docs\PLUGIN-SDK.md",
         "dist\plugins\com.mcsm.player-admin-1.1.0.zip"
     )
@@ -91,8 +96,6 @@ try {
 
 $existing = @()
 try { $existing = @($release.assets | ForEach-Object { $_.name }) } catch { }
-$curl = (Get-Command curl.exe -ErrorAction SilentlyContinue).Source
-if (-not $curl) { $curl = (Get-Command curl -ErrorAction SilentlyContinue).Source }
 
 foreach ($asset in $Assets) {
     $name = Split-Path $asset -Leaf
@@ -101,13 +104,31 @@ foreach ($asset in $Assets) {
         continue
     }
     $upload = "$api/releases/$($release.id)/assets?name=$([uri]::EscapeDataString($name))"
-    if ($curl) {
-        $output = & $curl -sS -X POST -H "Authorization: token $Token" -H "User-Agent: mcsm-gitea-release" `
-                          -F "attachment=@$((Resolve-Path $asset).Path)" $upload 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "上传附件失败：$name -> $output" }
+    $client = New-Object System.Net.Http.HttpClient
+    $stream = $null
+    $form = $null
+    try {
+        $client.DefaultRequestHeaders.Authorization =
+            New-Object System.Net.Http.Headers.AuthenticationHeaderValue("token", $Token)
+        $client.DefaultRequestHeaders.UserAgent.ParseAdd("mcsm-gitea-release")
+        $stream = [System.IO.File]::OpenRead((Resolve-Path -LiteralPath $asset).Path)
+        $fileContent = New-Object System.Net.Http.StreamContent($stream)
+        $fileContent.Headers.ContentType =
+            New-Object System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream")
+        $form = New-Object System.Net.Http.MultipartFormDataContent
+        $form.Add($fileContent, "attachment", $name)
+        $response = $client.PostAsync($upload, $form).GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) {
+            $detail = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            throw ("HTTP {0}: {1}" -f [int]$response.StatusCode, $detail)
+        }
         Write-Host "已上传：$name" -ForegroundColor Green
-    } else {
-        throw "找不到 curl.exe，无法上传附件 $name"
+    } catch {
+        throw "上传附件失败：$name -> $($_.Exception.Message)"
+    } finally {
+        if ($form) { $form.Dispose() }
+        if ($stream) { $stream.Dispose() }
+        $client.Dispose()
     }
 }
 

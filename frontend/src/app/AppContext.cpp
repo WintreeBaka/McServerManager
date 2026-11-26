@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QEvent>
 #include <QFileInfo>
 #include <QFont>
 #include <QJsonArray>
@@ -12,6 +13,7 @@
 #include <QAbstractItemView>
 
 #include "app/Easing.h"
+#include "app/Constants.h"
 #include "plugin/PluginHost.h"
 
 namespace mcsm {
@@ -56,6 +58,11 @@ AppContext::AppContext(QObject *parent)
 
     m_pollTimer.setInterval(kPollIntervalMs);
     connect(&m_pollTimer, &QTimer::timeout, this, &AppContext::onPoll);
+    m_settingsSyncTimer.setSingleShot(true);
+    m_settingsSyncTimer.setInterval(constants::kStorageSyncDelayMs);
+    connect(&m_settingsSyncTimer, &QTimer::timeout, this, [this]() { m_settings->sync(); });
+    if (auto *application = qobject_cast<QApplication *>(QCoreApplication::instance()))
+        application->installEventFilter(this);
     connect(m_backend, &BackendClient::availabilityChanged, this, [this](bool available) {
         emit backendAvailabilityChanged(available);
         if (available) {
@@ -162,7 +169,7 @@ void AppContext::saveSettings()
     m_settings->setValue(QStringLiteral("backend/executable"), m_backend->executable());
     m_settings->setValue(QStringLiteral("backend/executableConfirmed"), m_backendExecutableConfirmed);
     m_settings->setValue(QStringLiteral("backend/home"), m_backend->dataHome());
-    m_settings->sync();
+    m_settingsSyncTimer.start();
 }
 
 void AppContext::setBackendExecutable(const QString &path, bool userConfirmed)
@@ -215,6 +222,32 @@ void AppContext::applyComboPopupStyle(QApplication *application)
         if (QWidget *container = view->parentWidget())
             container->setStyleSheet(containerStyle);
     }
+}
+
+bool AppContext::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::Polish || event->type() == QEvent::Show) {
+        if (auto *combo = qobject_cast<QComboBox *>(watched)) {
+            const Palette &p = ThemeManager::instance()->palette();
+            const QString popupStyle =
+                QStringLiteral("QAbstractItemView { background: %1; color: %2; border: 1px solid %3;"
+                               " border-radius: 10px; padding: 4px; outline: none; }"
+                               "QAbstractItemView::item { padding: 6px 10px; border-radius: 8px;"
+                               " min-height: 22px; }"
+                               "QAbstractItemView::item:selected { background: %4; color: %2; }"
+                               "QAbstractItemView::item:hover { background: %4; color: %2; }")
+                    .arg(p.surface.name(), p.text.name(), p.border.name(), p.surfaceHover.name());
+            if (QAbstractItemView *view = combo->view()) {
+                view->setStyleSheet(popupStyle);
+                if (QWidget *container = view->parentWidget()) {
+                    container->setStyleSheet(
+                        QStringLiteral("background: %1; border: 1px solid %2; border-radius: 12px;")
+                            .arg(p.surface.name(), p.border.name()));
+                }
+            }
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 ThemeManager::AccentStyle AppContext::accentStyle() const
@@ -378,7 +411,8 @@ void AppContext::refreshEnvironment()
     // `doctor` shells out to docker/tasklist: it is far too expensive to run on
     // every page activation, so page-triggered checks are rate limited. The
     // background poller (every ~20s) is the only unfiltered caller.
-    if (m_environmentTimer.isValid() && m_environmentTimer.elapsed() < 4000)
+    if (m_environmentTimer.isValid()
+        && m_environmentTimer.elapsed() < constants::kEnvironmentRefreshThrottleMs)
         return;
     m_environmentTimer.restart();
     m_backend->request({QStringLiteral("doctor")}, this, [this](const Reply &reply) {

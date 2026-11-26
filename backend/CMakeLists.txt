@@ -61,6 +61,7 @@ qt_add_executable(mcsm-cli
 )
 
 target_include_directories(mcsm-cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(mcsm-cli PRIVATE MCSM_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(mcsm-cli PRIVATE Qt6::Core Qt6::Network)
 

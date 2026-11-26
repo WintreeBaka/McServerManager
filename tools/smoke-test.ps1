@@ -13,12 +13,15 @@
 param(
     [string]$Exe = ".\build\bin\mcsm-cli.exe",
     [string]$DataRoot = ".\smoke-data",
-    [string]$QtBin = "D:\qt\6.11.2\mingw_64\bin",
-    [string]$MinGwBin = "D:\qt\Tools\mingw1310_64\bin",
+    [string]$QtBin = "",
+    [string]$MinGwBin = "",
     [switch]$KeepData
 )
 
 $ErrorActionPreference = "Stop"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "script-common.ps1")
+$projectVersion = Get-ProjectVersion -ProjectRoot $projectRoot
 # mcsm-cli prints UTF-8 JSON. Without this, PowerShell decodes native output with
 # the console code page (GBK) and every Chinese message turns into mojibake.
 $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -78,14 +81,20 @@ if (Test-Path $DataRoot) {
         Write-Host "reusing data root $DataRoot"
     } else {
         Write-Host "cleaning previous data root $DataRoot"
-        Remove-Item -LiteralPath $DataRoot -Recurse -Force
+        Remove-ManagedDirectory -Path $DataRoot
     }
 }
 New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
+Set-ManagedMarker -Path $DataRoot
 $DataRoot = (Resolve-Path $DataRoot).Path
 
-if ($QtBin -and (Test-Path $QtBin)) { $env:PATH = "$QtBin;$env:PATH" }
-if ($MinGwBin -and (Test-Path $MinGwBin)) { $env:PATH = "$MinGwBin;$env:PATH" }
+if (-not $QtBin -or -not $MinGwBin) {
+    $qtKit = if ($QtBin) { Split-Path -Parent $QtBin } else { Find-QtKit -ProjectRoot $projectRoot }
+    $runtime = Resolve-QtRuntime -QtKit $qtKit
+    if (-not $QtBin) { $QtBin = $runtime.Bin }
+    if (-not $MinGwBin) { $MinGwBin = $runtime.MinGwBin }
+}
+Add-RuntimePath @($QtBin, $MinGwBin)
 $nodeAvailable = [bool](Get-Command node -ErrorAction SilentlyContinue)
 
 Write-Host ""
@@ -98,6 +107,8 @@ Write-Host ""
 Write-Host "metadata" -ForegroundColor Cyan
 $version = Invoke-Cli @("version")
 Write-Result "version" ($version.ok -and $version.data.name -eq "mcsm-cli") $version.data.home
+Write-Result "version matches CMakeLists" ($version.ok -and $version.data.version -eq $projectVersion) `
+    ("expected " + $projectVersion + ", got " + $version.data.version)
 
 $types = Invoke-Cli @("types")
 Write-Result "types" ($types.ok -and $types.data.types.Count -ge 4) ("types=" + $types.data.types.Count)
@@ -413,8 +424,8 @@ function New-PluginZip {
     )
     if (-not $zipTool) { return $false }
     $stage = Join-Path $Assets "plugin-$Id"
-    if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
-    New-Item -ItemType Directory -Path $stage -Force | Out-Null
+    if (Test-Path $stage) { Remove-ManagedDirectory -Path $stage }
+    Set-ManagedMarker -Path $stage
 
     $manifest = [ordered]@{
         id          = $Id
@@ -734,7 +745,7 @@ Write-Host ("passed: " + $script:passed + "   failed: " + $script:failed) `
 foreach ($note in $script:notes) { Write-Host ("note: " + $note) -ForegroundColor DarkGray }
 
 if (-not $KeepData) {
-    Remove-Item -LiteralPath $DataRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-ManagedDirectory -Path $DataRoot
     Write-Host "removed smoke data root"
 } else {
     Write-Host "kept smoke data root: $DataRoot"

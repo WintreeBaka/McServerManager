@@ -137,8 +137,8 @@ public:
     void setPageContent(const QString &pageId, const QJsonArray &blocks);
     void pushToast(const QString &message, const QString &level);
     void reportLog(const QString &pluginId, const QString &message);
-    void invokeBackend(const QStringList &arguments, const QJSValue &callback,
-                       QJSEngine *engine = nullptr);
+    void invokeBackend(const QString &pluginId, const QStringList &arguments,
+                       const QJSValue &callback, QJSEngine *engine = nullptr);
     QVariant storageValue(const QString &pluginId, const QString &key) const;
     void setStorageValue(const QString &pluginId, const QString &key, const QVariant &value);
     void removeStorageValue(const QString &pluginId, const QString &key);

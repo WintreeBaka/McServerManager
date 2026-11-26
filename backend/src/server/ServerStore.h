@@ -3,6 +3,8 @@
 #include <QString>
 #include <QVector>
 
+#include <functional>
+
 #include "core/JsonUtil.h"
 #include "server/ServerRecord.h"
 
@@ -37,6 +39,10 @@ public:
     const QString &registryPath() const { return m_path; }
 
 private:
+    bool reloadFile(QString *error = nullptr);
+    bool writeFileLocked(QString *error = nullptr) const;
+    bool transaction(const std::function<bool(QString *)> &mutation, QString *error);
+
     QString m_path;
     QVector<ServerRecord> m_records;
     QString m_lastError;

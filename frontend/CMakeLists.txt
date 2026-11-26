@@ -32,6 +32,7 @@ set(MCSM_GUI_SOURCES
 set(MCSM_GUI_HEADERS
     src/app/AppContext.h
     src/app/BackendClient.h
+    src/app/Constants.h
     src/app/ThemeManager.h
     src/app/Easing.h
     src/plugin/PluginHost.h
@@ -65,6 +66,7 @@ qt_add_executable(McServerManager
 )
 
 target_include_directories(McServerManager PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(McServerManager PRIVATE MCSM_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(McServerManager PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Qml)
 

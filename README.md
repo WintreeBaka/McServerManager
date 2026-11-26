@@ -127,14 +127,15 @@
 .\scripts\build-windows.ps1
 
 # 也可以指定套件；-Deploy 会调用 windeployqt 生成可直接分发的目录
-.\scripts\build-windows.ps1 -QtDir "D:\qt\6.11.2\mingw_64" -Deploy
+.\scripts\build-windows.ps1 -QtDir "C:\Qt\6.8.3\mingw_64" -Deploy
 
 # 全新构建
-.\scripts\build-windows.ps1 -QtDir "D:\qt\6.11.2\mingw_64" -Reconfigure
+.\scripts\build-windows.ps1 -QtDir "C:\Qt\6.8.3\mingw_64" -Reconfigure
 ```
 
 > MinGW 套件下如果出现 `cc1plus.exe` 退出码 `0xC0000135`，是因为编译器找不到自己的 DLL
-> （`D:\qt\Tools\mingw1310_64\bin` 不在 `PATH`）。构建脚本已自动处理这一点。
+> （Qt 套件旁的 `Tools\mingw*\bin` 不在 `PATH`）。构建脚本会从 `QT_ROOT`、`qmake` 或常见 Qt
+> 安装位置探测套件，并自动处理这一点。
 
 ### Linux / macOS
 
@@ -189,6 +190,7 @@ mcsm-cli plugin service start --name com.example.ops-console     # 启动插件�
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | 前后端 JSON 协议、NDJSON 进度与日志流 |
 | [`docs/PLUGIN-SDK.md`](docs/PLUGIN-SDK.md) | **管理器插件接口**：包结构、`plugin.json` 全字段、前端 `mcsm.*` API、后端 JSON-Line 钩子与启动补丁、Web 面板、权限与调试 |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | 常见问题与排查方法 |
+| [`docs/SCRIPT-EXECUTION-POLICY.md`](docs/SCRIPT-EXECUTION-POLICY.md) | PowerShell 脚本执行策略与安全建议 |
 | [`examples/plugins/`](examples/plugins) | 三个可直接安装的示例插件（前端 / 后端 / 全局）+ 打包脚本 |
 | [`packaging/QUICKSTART.txt`](packaging/QUICKSTART.txt) | 面向最终用户的上手说明（随发行包分发） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本记录 |
@@ -228,7 +230,7 @@ powershell -File tools/smoke-test.ps1   # 后端冒烟测试（85 项，含插�
 powershell -File tools/gui-smoke.ps1    # 界面冒烟测试（启动、拖拽、快速切页残留对比、截图）
 powershell -File tools/gui-smoke.ps1 -Page settings-runtime -Resize 1100x700 -Screenshot small.png   # 小窗口布局回归
 python tools/check-endpoints.py    # 检查上游 API（Mojang / Paper / Purpur / Fabric / Modrinth…）可用性
-python tools/rcon-probe.py 127.0.0.1 25575 <密码>   # RCON 协议探针
+$env:MCSM_RCON_PASSWORD = "密码"; python tools/rcon-probe.py 127.0.0.1 25575   # RCON 协议探针
 python tools/host-runtime-check.py  # 实验性「本机 JDK」模式端到端检查
 powershell -File tools/verify-third-party.ps1  # 校验内置 7-Zip x64 版本与 SHA-256
 ```
@@ -236,7 +238,7 @@ powershell -File tools/verify-third-party.ps1  # 校验内置 7-Zip x64 版本�
 ## 打包发行版
 
 ```powershell
-.\scripts\build-windows.ps1 -QtDir "D:\qt\6.11.2\mingw_64" -Deploy
+.\scripts\build-windows.ps1 -QtDir "C:\Qt\6.8.3\mingw_64" -Deploy
 
 .\tools\package-release.ps1                       # 纯程序版
 .\tools\package-release.ps1 -Flavor with-plugins  # 额外带 plugin-packages\（示例插件 zip，可直接导入）

@@ -4,6 +4,7 @@
 #include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QListWidget>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -50,6 +51,27 @@ bool safeOpenUrl(const QString &url)
     if (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
         return false;
     return QDesktopServices::openUrl(target);
+}
+
+void relayoutListRows(QListWidget *list)
+{
+    if (!list)
+        return;
+    constexpr int kItemPadding = 6;
+    const int contentWidth = qMax(160, list->viewport()->width() - 2 * kItemPadding);
+    for (int i = 0; i < list->count(); ++i) {
+        QListWidgetItem *item = list->item(i);
+        QWidget *row = list->itemWidget(item);
+        if (!item || !row)
+            continue;
+        int height = row->layout() ? row->layout()->heightForWidth(contentWidth) : -1;
+        if (height <= 0)
+            height = row->sizeHint().height();
+        const QSize wanted(contentWidth + 2 * kItemPadding,
+                           height + 2 * kItemPadding + 2);
+        if (item->sizeHint() != wanted)
+            item->setSizeHint(wanted);
+    }
 }
 
 CardFrame::CardFrame(QWidget *parent)

@@ -22,7 +22,12 @@ public:
     QString lastError() const { return m_lastError; }
 
 private:
-    enum PacketType { Response = 0, Command = 2, Auth = 3 };
+    enum PacketType {
+        ResponseValue = 0,
+        AuthResponse = 2,
+        Command = 2,
+        Auth = 3
+    };
 
     bool sendPacket(int id, int type, const QByteArray &body, QString *error);
     bool readPacket(int *id, int *type, QByteArray *body, QString *error);

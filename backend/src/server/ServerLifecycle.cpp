@@ -32,33 +32,6 @@ bool looksLikeReady(const QString &logText)
     return logText.contains(kReadyMarker);
 }
 
-bool processRunning(qint64 pid)
-{
-    if (pid <= 0)
-        return false;
-#ifdef Q_OS_WIN
-    const ProcessResult result = ProcessRunner::run(
-        QStringLiteral("tasklist"),
-        {QStringLiteral("/FI"), QStringLiteral("PID eq %1").arg(pid), QStringLiteral("/NH")}, 20000);
-    return result.stdOut.contains(QString::number(pid));
-#else
-    return QFileInfo::exists(QStringLiteral("/proc/%1").arg(pid));
-#endif
-}
-
-/// Cheap liveness probe that does not depend on pid bookkeeping: if the RCON
-/// port accepts a connection the server process is definitely alive.
-bool portAcceptsConnection(quint16 port)
-{
-    if (port == 0)
-        return false;
-    QTcpSocket socket;
-    socket.connectToHost(QStringLiteral("127.0.0.1"), port);
-    const bool connected = socket.waitForConnected(400);
-    socket.abort();
-    return connected;
-}
-
 qint64 readPidFile(const ServerRecord &record)
 {
     QFile file(record.hostPidFile());
@@ -70,12 +43,28 @@ qint64 readPidFile(const ServerRecord &record)
     return ok ? pid : 0;
 }
 
+bool processBelongsToHostServer(qint64 pid, const ServerRecord &record)
+{
+    if (!ProcessRunner::processMatches(pid, QFileInfo(record.javaExecutable()).fileName()))
+        return false;
+    const QString command = ProcessRunner::processCommandLine(pid);
+    if (command.isEmpty())
+        return false;
+    return command.contains(QDir::toNativeSeparators(record.dir), Qt::CaseInsensitive);
+}
+
 void writePidFile(const ServerRecord &record, qint64 pid)
 {
     QFile file(record.hostPidFile());
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        file.write(QByteArray::number(pid));
-        file.close();
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        Logger::warn(QStringLiteral("server.lifecycle"),
+                     QStringLiteral("无法写入 PID 文件 %1: %2").arg(record.hostPidFile(), file.errorString()));
+        return;
+    }
+    const QByteArray bytes = QByteArray::number(pid);
+    if (file.write(bytes) != bytes.size()) {
+        Logger::warn(QStringLiteral("server.lifecycle"),
+                     QStringLiteral("PID 文件写入不完整 %1: %2").arg(record.hostPidFile(), file.errorString()));
     }
 }
 
@@ -91,11 +80,13 @@ QList<qint64> orphanJavaPids(const ServerRecord &record)
 {
     QList<qint64> pids;
 #ifdef Q_OS_WIN
+    QString escaped = QDir::toNativeSeparators(record.dir);
+    escaped.replace(QLatin1Char('\''), QLatin1String("''"));
     const QString script = QStringLiteral(
         "Get-CimInstance Win32_Process -Filter \"Name='java.exe'\" | "
-        "Where-Object { $_.CommandLine -like '*%1*' } | "
+        "Where-Object { $_.CommandLine -like ('*' + [WildcardPattern]::Escape('%1') + '*') } | "
         "ForEach-Object { $_.ProcessId }")
-                               .arg(QDir::toNativeSeparators(record.dir));
+                               .arg(escaped);
     const ProcessResult result = ProcessRunner::run(
         QStringLiteral("powershell"),
         {QStringLiteral("-NoProfile"), QStringLiteral("-Command"), script}, 30000);
@@ -114,14 +105,7 @@ QList<qint64> orphanJavaPids(const ServerRecord &record)
 
 void forceKill(qint64 pid)
 {
-#ifdef Q_OS_WIN
-    ProcessRunner::run(QStringLiteral("taskkill"),
-                       {QStringLiteral("/PID"), QString::number(pid), QStringLiteral("/T"),
-                        QStringLiteral("/F")},
-                       60000);
-#else
-    ProcessRunner::run(QStringLiteral("kill"), {QStringLiteral("-9"), QString::number(pid)}, 30000);
-#endif
+    ProcessRunner::killProcess(pid, true, 60000);
 }
 
 QString readHostLog(const ServerRecord &record, int lines)
@@ -212,7 +196,8 @@ QString ServerLifecycle::runtimeState(const ServerRecord &record)
 {
     if (record.usesHostJdk()) {
         const qint64 pid = readPidFile(record);
-        if (processRunning(pid) || portAcceptsConnection(quint16(record.rconPort)))
+        if (processBelongsToHostServer(pid, record)
+            || ProcessRunner::portOpen(quint16(record.rconPort), 400))
             return QStringLiteral("running");
         return QStringLiteral("stopped");
     }
@@ -391,7 +376,7 @@ StartOutcome ServerLifecycle::startRecord(ServerStore &store, const QString &id,
         }
 
         const qint64 stale = readPidFile(record);
-        if (stale > 0 && processRunning(stale)) {
+        if (stale > 0 && processBelongsToHostServer(stale, record)) {
             outcome.ok = true;
             outcome.status = QStringLiteral("running");
             outcome.message = QStringLiteral("服务器已在运行");
@@ -458,7 +443,7 @@ StartOutcome ServerLifecycle::startRecord(ServerStore &store, const QString &id,
                 store.update(record);
                 return outcome;
             }
-            if (!processRunning(pid)) {
+            if (!ProcessRunner::processAlive(pid)) {
                 outcome.status = QStringLiteral("error");
                 outcome.message = detectFailure(lastLog).isEmpty()
                                       ? QStringLiteral("服务器进程已退出，请查看日志输出")
@@ -678,12 +663,20 @@ Result ServerLifecycle::stopRecord(ServerStore &store, ServerRecord record, bool
     // experimental host runtime: stop the cloned-JDK process instead of a container
     if (record.usesHostJdk()) {
         const qint64 pid = readPidFile(record);
-        if (pid <= 0 || !processRunning(pid)) {
+        if (pid <= 0 || !ProcessRunner::processAlive(pid)) {
             clearPidFile(record);
             record.status = QStringLiteral("stopped");
             store.update(record);
             return Result::ok(QJsonObject {{QStringLiteral("status"), QStringLiteral("stopped")},
                                            {QStringLiteral("note"), QStringLiteral("进程未在运行")}});
+        }
+        if (!processBelongsToHostServer(pid, record)) {
+            clearPidFile(record);
+            record.status = QStringLiteral("stopped");
+            store.update(record);
+            return Result::ok(QJsonObject {
+                {QStringLiteral("status"), QStringLiteral("stopped")},
+                {QStringLiteral("note"), QStringLiteral("PID 已被其它程序复用，已清理记录且未结束该进程")}});
         }
 
         QString note;
@@ -704,7 +697,7 @@ Result ServerLifecycle::stopRecord(ServerStore &store, ServerRecord record, bool
 
         bool exited = false;
         for (int second = 0; second < (force ? 2 : 45); ++second) {
-            if (!processRunning(pid)) {
+            if (!ProcessRunner::processAlive(pid)) {
                 exited = true;
                 break;
             }

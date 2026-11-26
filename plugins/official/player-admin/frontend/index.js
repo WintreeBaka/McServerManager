@@ -101,7 +101,13 @@
                 done(null, reply.error || "后端调用失败");
                 return;
             }
-            var payload = reply.data && reply.data.data ? reply.data.data : reply.data;
+            var inner = reply.data || {};
+            if (Object.prototype.hasOwnProperty.call(inner, "ok") && !inner.ok) {
+                var error = inner.error || {};
+                done(null, error.message || error.detail || "插件后端调用失败");
+                return;
+            }
+            var payload = Object.prototype.hasOwnProperty.call(inner, "data") ? inner.data : inner;
             done(payload || {}, "");
         });
     }

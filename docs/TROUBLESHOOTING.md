@@ -21,8 +21,8 @@
 
 **MinGW 编译时 `cc1plus.exe` 以 `0xC0000135` 退出**
 
-编译器找不到自己的 DLL，把 `D:\qt\Tools\mingw1310_64\bin` 加入 `PATH` 即可；
-仓库里的 `scripts/build-windows.ps1` 会自动处理。
+编译器找不到自己的 DLL，把当前 Qt 安装下的 `Tools\mingw*\bin` 加入 `PATH` 即可；
+仓库里的 `scripts/build-windows.ps1` 会自动探测并处理（也可用 `QT_ROOT` 指向 Qt 根目录）。
 
 ## 服务器相关
 

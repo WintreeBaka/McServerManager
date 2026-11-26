@@ -9,6 +9,7 @@
 #include "widgets/Common.h"
 
 class QLabel;
+class QTimer;
 class QVBoxLayout;
 
 namespace mcsm {
@@ -42,6 +43,7 @@ private:
     QWidget *m_container = nullptr;
     QVBoxLayout *m_layout = nullptr;
     LogView *m_log = nullptr;
+    QTimer *m_rebuildTimer = nullptr;
     QVector<QString> m_pendingLog;
     /// Ticked rows of selectable tables, keyed by the block's `key`.
     QHash<QString, QStringList> m_selection;

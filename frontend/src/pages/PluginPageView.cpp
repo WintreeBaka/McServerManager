@@ -23,11 +23,17 @@
 #include <QVBoxLayout>
 
 #include "app/AppContext.h"
+#include "app/Constants.h"
 #include "widgets/Chip.h"
 #include "widgets/LogView.h"
 
 namespace mcsm {
 namespace {
+
+QString boundedText(const QString &text, int limit = constants::kMaxPluginBlockTextChars)
+{
+    return text.size() > limit ? text.left(limit) + QStringLiteral("…[truncated]") : text;
+}
 
 void clearLayout(QLayout *layout)
 {
@@ -132,8 +138,19 @@ PluginPageView::PluginPageView(const PluginPageInfo &info, QWidget *parent)
 
 void PluginPageView::setBlocks(const QJsonArray &blocks)
 {
-    m_blocks = blocks;
-    rebuild();
+    m_blocks = QJsonArray();
+    const int count = qMin(blocks.size(), constants::kMaxPluginPageBlocks);
+    for (int index = 0; index < count; ++index)
+        m_blocks.append(blocks.at(index));
+    // Plugins may redraw several times in one event-loop turn. Coalesce those
+    // redraws so the widget tree and the scroll position do not thrash.
+    if (!m_rebuildTimer) {
+        m_rebuildTimer = new QTimer(this);
+        m_rebuildTimer->setSingleShot(true);
+        m_rebuildTimer->setInterval(constants::kPluginPageRebuildDebounceMs);
+        connect(m_rebuildTimer, &QTimer::timeout, this, &PluginPageView::rebuild);
+    }
+    m_rebuildTimer->start();
 }
 
 void PluginPageView::rebuild()
@@ -193,7 +210,7 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
     }
 
     if (type == QLatin1String("heading")) {
-        auto *label = makeLabel(block.value(QStringLiteral("text")).toString(),
+        auto *label = makeLabel(boundedText(block.value(QStringLiteral("text")).toString()),
                                 QStringLiteral("subtitle"), m_container);
         label->setWordWrap(true);
         QFont font = label->font();
@@ -204,14 +221,16 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
     }
 
     if (type == QLatin1String("text")) {
-        auto *label = makeLabel(block.value(QStringLiteral("text")).toString(),
+        auto *label = makeLabel(boundedText(block.value(QStringLiteral("text")).toString()),
                                 blockStyle(block, QStringLiteral("caption")), m_container);
         label->setWordWrap(true);
         return label;
     }
 
     if (type == QLatin1String("html")) {
-        auto *label = new QLabel(block.value(QStringLiteral("html")).toString(), m_container);
+        auto *label = new QLabel(boundedText(block.value(QStringLiteral("html")).toString(),
+                                             constants::kMaxPluginHtmlChars),
+                                 m_container);
         label->setTextFormat(Qt::RichText);
         label->setWordWrap(true);
         label->setOpenExternalLinks(false);
@@ -228,20 +247,22 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         grid->setVerticalSpacing(8);
         int row = 0;
         const QJsonArray items = block.value(QStringLiteral("items")).toArray();
-        for (const QJsonValue &value : items) {
+        const int itemCount = qMin(items.size(), constants::kMaxPluginTableRows);
+        for (int itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
+            const QJsonValue value = items.at(itemIndex);
             QString key;
             QString text;
             if (value.isArray()) {
                 const QJsonArray pair = value.toArray();
-                key = pair.at(0).toString();
+                key = pair.isEmpty() ? QString() : pair.at(0).toString();
                 text = pair.size() > 1 ? pair.at(1).toString() : QString();
             } else {
                 const QJsonObject entry = value.toObject();
                 key = entry.value(QStringLiteral("key")).toString();
                 text = entry.value(QStringLiteral("value")).toString();
             }
-            grid->addWidget(makeLabel(key, QStringLiteral("caption"), card), row, 0);
-            auto *valueLabel = makeLabel(text, QStringLiteral("subtitle"), card);
+            grid->addWidget(makeLabel(boundedText(key, 2000), QStringLiteral("caption"), card), row, 0);
+            auto *valueLabel = makeLabel(boundedText(text), QStringLiteral("subtitle"), card);
             valueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
             grid->addWidget(valueLabel, row, 1);
             ++row;
@@ -267,6 +288,8 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         const QString title = block.value(QStringLiteral("title")).toString();
         const QJsonArray columns = block.value(QStringLiteral("columns")).toArray();
         const QJsonArray rows = block.value(QStringLiteral("rows")).toArray();
+        const int columnCount = qMin(columns.size(), constants::kMaxPluginTableColumns);
+        const int rowCount = qMin(rows.size(), constants::kMaxPluginTableRows);
 
         auto *head = new QWidget(card);
         auto *headLayout = new QHBoxLayout(head);
@@ -300,13 +323,13 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
             layout->addWidget(head);
 
         auto *table = new QTableWidget(card);
-        table->setColumnCount(columns.size() + (selectable ? 1 : 0));
-        table->setRowCount(rows.size());
+        table->setColumnCount(columnCount + (selectable ? 1 : 0));
+        table->setRowCount(rowCount);
         QStringList header;
         if (selectable)
             header << QString();
-        for (const QJsonValue &column : columns)
-            header << column.toString();
+        for (int column = 0; column < columnCount; ++column)
+            header << boundedText(columns.at(column).toString(), 1000);
         table->setHorizontalHeaderLabels(header);
         table->verticalHeader()->setVisible(false);
         table->setFrameShape(QFrame::NoFrame);
@@ -364,7 +387,7 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         if (selectionLabel)
             selectionLabel->setText(QStringLiteral("已选 %1 台").arg(selection.size()));
 
-        for (int row = 0; row < rows.size(); ++row) {
+        for (int row = 0; row < rowCount; ++row) {
             const QJsonArray cells = rows.at(row).toArray();
             QString rowId = rowIds.size() > row ? rowIds.at(row).toString() : QString();
             if (rowId.isEmpty())
@@ -404,15 +427,16 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
                                  });
                 columnOffset = 1;
             }
-            for (int column = 0; column < columns.size(); ++column) {
-                const QString text = column < cells.size() ? cells.at(column).toString() : QString();
+            for (int column = 0; column < columnCount; ++column) {
+                const QString text =
+                    boundedText(column < cells.size() ? cells.at(column).toString() : QString(), 4000);
                 auto *item = new QTableWidgetItem(text);
                 item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
                 item->setFlags(Qt::ItemIsEnabled);
                 table->setItem(row, column + columnOffset, item);
             }
         }
-        const int height = qMin(60 + rows.size() * 34, 380);
+        const int height = qMin(60 + rowCount * 34, 380);
         table->setMinimumHeight(height);
         layout->addWidget(table);
 
@@ -425,12 +449,14 @@ QWidget *PluginPageView::buildBlock(const QJsonObject &block)
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(10);
         const QJsonArray items = block.value(QStringLiteral("items")).toArray();
-        for (const QJsonValue &value : items) {
+        const int itemCount = qMin(items.size(), 40);
+        for (int itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
+            const QJsonValue value = items.at(itemIndex);
             const QJsonObject item = value.toObject();
             const QString label = item.value(QStringLiteral("label")).toString();
             if (label.isEmpty())
                 continue;
-            auto *button = new GradientButton(label, row);
+            auto *button = new GradientButton(boundedText(label, 200), row);
             button->setCompact(true);
             const QString glyph = item.value(QStringLiteral("icon")).toString();
             if (!glyph.isEmpty())
@@ -563,7 +589,9 @@ void PluginPageView::runCommand(const QString &command, const QString &toast,
 void PluginPageView::appendLog(const QString &line)
 {
     if (!m_log) {
-        m_pendingLog << line;
+        m_pendingLog << boundedText(line, constants::kMaxPluginBlockTextChars);
+        if (m_pendingLog.size() > constants::kMaxPluginPendingLogLines)
+            m_pendingLog.removeFirst();
         return;
     }
     m_log->appendLine(QStringLiteral("%1  %2")

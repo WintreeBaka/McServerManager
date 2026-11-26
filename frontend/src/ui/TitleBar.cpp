@@ -229,8 +229,17 @@ void TitleBar::mousePressEvent(QMouseEvent *event)
 
 void TitleBar::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    FramelessHelper::toggleMaximized(window());
-    event->accept();
+    QWidget *target = childAt(event->position().toPoint());
+    if (target && target != this) {
+        event->ignore();
+        return;
+    }
+    if (event->button() == Qt::LeftButton) {
+        FramelessHelper::toggleMaximized(window());
+        event->accept();
+        return;
+    }
+    QWidget::mouseDoubleClickEvent(event);
 }
 
 } // namespace mcsm

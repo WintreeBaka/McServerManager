@@ -26,70 +26,16 @@ QString serviceFileName()
     return QStringLiteral("service.json");
 }
 
-bool processAlive(qint64 pid)
-{
-    if (pid <= 0)
-        return false;
-#ifdef Q_OS_WIN
-    const ProcessResult result =
-        ProcessRunner::run(QStringLiteral("tasklist"),
-                           {QStringLiteral("/FI"), QStringLiteral("PID eq %1").arg(pid),
-                            QStringLiteral("/NH")},
-                           20000);
-    return result.stdOut.contains(QString::number(pid));
-#else
-    return QFileInfo::exists(QStringLiteral("/proc/%1").arg(pid));
-#endif
-}
-
-/// Image name of a running process (empty when it cannot be determined).
-QString processImageName(qint64 pid)
-{
-    if (pid <= 0)
-        return QString();
-#ifdef Q_OS_WIN
-    const ProcessResult result =
-        ProcessRunner::run(QStringLiteral("tasklist"),
-                           {QStringLiteral("/FI"), QStringLiteral("PID eq %1").arg(pid),
-                            QStringLiteral("/FO"), QStringLiteral("CSV"),
-                            QStringLiteral("/NH")},
-                           20000);
-    // "image.exe","1234","Console",...
-    const QString text = result.stdOut.trimmed();
-    const int first = text.indexOf(QLatin1Char('"'));
-    const int second = first >= 0 ? text.indexOf(QLatin1Char('"'), first + 1) : -1;
-    if (first >= 0 && second > first)
-        return text.mid(first + 1, second - first - 1).trimmed();
-    return QString();
-#else
-    QFile file(QStringLiteral("/proc/%1/comm").arg(pid));
-    if (!file.open(QIODevice::ReadOnly))
-        return QString();
-    return QString::fromUtf8(file.readAll()).trimmed();
-#endif
-}
-
 /// A PID alone can be reused by an unrelated process; require the recorded
 /// executable name to match before we treat it as "our" service / kill it.
-bool servicePidMatches(qint64 pid, const QString &image)
+bool servicePidMatches(qint64 pid, const QString &image, const QString &command = QString())
 {
-    if (pid <= 0 || !processAlive(pid))
+    if (!ProcessRunner::processMatches(pid, image))
         return false;
-    if (image.isEmpty())
+    if (command.trimmed().isEmpty())
         return true;
-    const QString actual = processImageName(pid);
-    return actual.isEmpty() || actual.compare(image, Qt::CaseInsensitive) == 0;
-}
-
-bool portOpen(quint16 port)
-{
-    if (port == 0)
-        return false;
-    QTcpSocket socket;
-    socket.connectToHost(QStringLiteral("127.0.0.1"), port);
-    const bool connected = socket.waitForConnected(500);
-    socket.abort();
-    return connected;
+    const QString actual = ProcessRunner::processCommandLine(pid);
+    return !actual.isEmpty() && actual.contains(command, Qt::CaseInsensitive);
 }
 
 QStringList matchingHooks(const PluginManifest &manifest)
@@ -553,7 +499,9 @@ Result PluginRuntime::serviceStart(const QString &pluginId)
 
     const QJsonObject existing = serviceFile(manifest.id);
     const qint64 existingPid = qint64(existing.value(QStringLiteral("pid")).toDouble());
-    if (existingPid > 0 && servicePidMatches(existingPid, existing.value(QStringLiteral("image")).toString()))
+    if (existingPid > 0
+        && servicePidMatches(existingPid, existing.value(QStringLiteral("image")).toString(),
+                             existing.value(QStringLiteral("command")).toString()))
         return Result::ok(QJsonObject {{QStringLiteral("alreadyRunning"), true},
                                        {QStringLiteral("pid"), double(existingPid)},
                                        {QStringLiteral("url"),
@@ -593,16 +541,16 @@ Result PluginRuntime::serviceStart(const QString &pluginId)
     record.insert(QStringLiteral("image"), QFileInfo(launch.program).fileName());
     record.insert(QStringLiteral("port"), port);
     record.insert(QStringLiteral("entry"), service);
+    record.insert(QStringLiteral("command"),
+                  QStringLiteral("%1 %2").arg(launch.program,
+                                              StringUtil::joinArgs(launch.arguments)).trimmed());
     record.insert(QStringLiteral("url"), port > 0
                                             ? QStringLiteral("http://127.0.0.1:%1/").arg(port)
                                             : QString());
     record.insert(QStringLiteral("startedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
     if (!writeServiceFile(manifest.id, record)) {
         // do not leave an untracked service process behind
-        ProcessRunner::run(QStringLiteral("taskkill"),
-                           {QStringLiteral("/PID"), QString::number(pid),
-                            QStringLiteral("/T"), QStringLiteral("/F")},
-                           20000);
+        ProcessRunner::killProcess(pid, true, 20000);
         return Result::fail(QStringLiteral("IO_ERROR"),
                             QStringLiteral("无法写入插件服务状态，已终止刚启动的进程"));
     }
@@ -623,23 +571,20 @@ Result PluginRuntime::serviceStop(const QString &pluginId)
     const QJsonObject record = serviceFile(manifest.id);
     const qint64 pid = qint64(record.value(QStringLiteral("pid")).toDouble());
     bool stopped = false;
-    if (pid > 0 && processAlive(pid)) {
-        if (!servicePidMatches(pid, record.value(QStringLiteral("image")).toString())) {
+    if (pid > 0 && ProcessRunner::processAlive(pid)) {
+        if (!servicePidMatches(pid, record.value(QStringLiteral("image")).toString(),
+                               record.value(QStringLiteral("command")).toString())) {
             // The PID now belongs to an unrelated program: never kill it.
             writeServiceFile(manifest.id, QJsonObject());
             return Result::fail(QStringLiteral("SERVICE_PID_REUSED"),
                                 QStringLiteral("记录的 PID 已被其它程序占用，已清理状态但未结束该进程"),
                                 QStringLiteral("pid=%1").arg(pid));
         }
-        const ProcessResult result =
-            ProcessRunner::run(QStringLiteral("taskkill"),
-                               {QStringLiteral("/PID"), QString::number(pid),
-                                QStringLiteral("/T"), QStringLiteral("/F")},
-                               30000);
-        stopped = result.ok() || !processAlive(pid);
+        stopped = ProcessRunner::killProcess(pid, true, 30000);
         if (!stopped) {
             return Result::fail(QStringLiteral("STOP_FAILED"),
-                                QStringLiteral("无法停止插件服务进程"), result.errorText());
+                                QStringLiteral("无法停止插件服务进程"),
+                                QStringLiteral("pid=%1").arg(pid));
         }
     }
     if (!writeServiceFile(manifest.id, QJsonObject()))
@@ -659,8 +604,9 @@ Result PluginRuntime::serviceStatus(const QString &pluginId)
     const QJsonObject record = serviceFile(manifest.id);
     const qint64 pid = qint64(record.value(QStringLiteral("pid")).toDouble());
     const int port = record.value(QStringLiteral("port")).toInt();
-    const bool alive = servicePidMatches(pid, record.value(QStringLiteral("image")).toString());
-    const bool listening = portOpen(quint16(port));
+    const bool alive = servicePidMatches(pid, record.value(QStringLiteral("image")).toString(),
+                                         record.value(QStringLiteral("command")).toString());
+    const bool listening = ProcessRunner::portOpen(quint16(port));
     QJsonObject data = record;
     data.insert(QStringLiteral("id"), manifest.id);
     data.insert(QStringLiteral("name"), manifest.name);

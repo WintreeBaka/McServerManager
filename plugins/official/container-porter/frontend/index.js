@@ -237,10 +237,16 @@
     /// `plugin call` 的输出是 {ok, data:{ok, data, log, error}}：外层是 CLI 的封装，
     /// 插件自己的结果在 reply.data 里。
     function unwrap(reply) {
+        if (!reply || !reply.ok) {
+            return { ok: false, code: "", message: (reply && (reply.error || reply.message)) || "后端调用失败" };
+        }
         var inner = (reply && reply.data) || {};
-        if (inner.ok) return { ok: true, data: inner.data || {} };
-        var error = inner.error || {};
-        return { ok: false, code: error.code || "", message: error.message || (reply && reply.error) || "未知错误" };
+        if (Object.prototype.hasOwnProperty.call(inner, "ok")) {
+            if (inner.ok) return { ok: true, data: inner.data || {} };
+            var error = inner.error || {};
+            return { ok: false, code: error.code || "", message: error.message || "未知错误" };
+        }
+        return { ok: true, data: inner };
     }
 
     function invoke(method, callback) {

@@ -7,7 +7,9 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTimer>
 
+#include "app/Constants.h"
 #include "app/Easing.h"
 #include "app/ThemeManager.h"
 
@@ -89,11 +91,19 @@ void LogView::setFilter(const QString &filter)
     if (m_filter == filter)
         return;
     m_filter = filter;
-    rebuild();
+    if (!m_filterTimer) {
+        m_filterTimer = new QTimer(this);
+        m_filterTimer->setSingleShot(true);
+        m_filterTimer->setInterval(constants::kLogFilterDebounceMs);
+        connect(m_filterTimer, &QTimer::timeout, this, &LogView::rebuild);
+    }
+    m_filterTimer->start();
 }
 
 void LogView::rebuild()
 {
+    if (m_filterTimer)
+        m_filterTimer->stop();
     clear();
     for (const QString &line : m_lines) {
         if (!m_filter.isEmpty() && !line.contains(m_filter, Qt::CaseInsensitive))

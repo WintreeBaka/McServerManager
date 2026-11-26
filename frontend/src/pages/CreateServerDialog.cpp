@@ -289,6 +289,16 @@ void CreateServerDialog::reject()
 void CreateServerDialog::loadTypes()
 {
     AppContext::instance()->backend()->request({QStringLiteral("types")}, this, [this](const Reply &reply) {
+        if (!reply.ok) {
+            m_types = QJsonArray();
+            const QVector<QComboBox *> combos = {m_type, m_manualType};
+            for (QComboBox *combo : combos) {
+                combo->clear();
+                combo->addItem(QStringLiteral("加载失败"), QString());
+            }
+            showError(QStringLiteral("无法加载服务端类型：%1").arg(reply.errorText()));
+            return;
+        }
         m_types = reply.data.value(QStringLiteral("types")).toArray();
         const QVector<QComboBox *> combos = {m_type, m_manualType};
         for (QComboBox *combo : combos) {

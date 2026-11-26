@@ -323,6 +323,29 @@ Result CommandRouter::cmdServer()
     if (action == QLatin1String("refresh"))
         return ServerLifecycle::refreshAll(store);
 
+    if (action == QLatin1String("register")) {
+        const QString file = m_args.value(QStringLiteral("file"));
+        if (file.isEmpty())
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
+                                QStringLiteral("缺少 --file 参数"));
+        QFile input(file);
+        if (!input.open(QIODevice::ReadOnly) || input.size() <= 0 || input.size() > 1024 * 1024)
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
+                                QStringLiteral("服务器记录文件不存在、为空或超过 1 MiB"));
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(input.readAll(), &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isObject())
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
+                                QStringLiteral("服务器记录不是合法 JSON 对象"),
+                                parseError.errorString());
+        const ServerRecord record = ServerRecord::fromJson(document.object());
+        QString addError;
+        if (!store.add(record, &addError))
+            return Result::fail(QStringLiteral("STORE_ERROR"),
+                                QStringLiteral("注册服务器失败"), addError);
+        return Result::ok(record.toJson(true));
+    }
+
     if (id.isEmpty())
         return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
                             QStringLiteral("缺少 --id 参数"));
@@ -411,9 +434,16 @@ Result CommandRouter::cmdServer()
         if (!store.update(updated, &updateError))
             return Result::fail(QStringLiteral("STORE_ERROR"), QStringLiteral("更新服务器失败"), updateError);
 
-        TemplateWriter::writeEula(updated, updated.eulaAccepted, nullptr);
-        TemplateWriter::writeStartScript(updated, nullptr);
-        TemplateWriter::writeComposeFile(updated, nullptr);
+        QString writeError;
+        if (!TemplateWriter::writeEula(updated, updated.eulaAccepted, &writeError))
+            Logger::warn(QStringLiteral("cli.server"),
+                         QStringLiteral("写入 eula.txt 失败：%1").arg(writeError));
+        if (!TemplateWriter::writeStartScript(updated, &writeError))
+            Logger::warn(QStringLiteral("cli.server"),
+                         QStringLiteral("写入启动脚本失败：%1").arg(writeError));
+        if (!TemplateWriter::writeComposeFile(updated, &writeError))
+            Logger::warn(QStringLiteral("cli.server"),
+                         QStringLiteral("写入 compose 文件失败：%1").arg(writeError));
 
         // keep the managed properties in sync with the record
         QMap<QString, QString> properties;
@@ -425,8 +455,13 @@ Result CommandRouter::cmdServer()
             properties.insert(QStringLiteral("server-port"), QString::number(updated.port));
         if (!properties.isEmpty()) {
             QVector<ConfigDiffEntry> diff;
-            ConfigManager::applyValues(updated, properties, QStringLiteral("update"),
-                                       QStringLiteral("通过服务器设置修改"), &diff, nullptr);
+            QString configError;
+            if (!ConfigManager::applyValues(updated, properties, QStringLiteral("update"),
+                                            QStringLiteral("通过服务器设置修改"), &diff,
+                                            &configError)) {
+                Logger::warn(QStringLiteral("cli.server"),
+                             QStringLiteral("同步 server.properties 失败：%1").arg(configError));
+            }
         }
 
         Result result = Result::ok(updated.toJson(true));

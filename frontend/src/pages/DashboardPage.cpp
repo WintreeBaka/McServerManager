@@ -289,9 +289,10 @@ void DashboardPage::applyDoctor(const QJsonObject &doctor, const QStringList &wa
         m_dockerValue->setText(cliFound ? QStringLiteral("未运行") : QStringLiteral("未安装"));
         m_dockerValue->setStyleSheet(QStringLiteral("color: %1;").arg(palette.danger.name()));
         const QString rawError = docker.value(QStringLiteral("error")).toString();
-        m_dockerHint->setText(rawError.isEmpty()
-                                  ? QStringLiteral("请启动 Docker Desktop")
-                                  : rawError.left(120) + QStringLiteral("..."));
+        m_dockerHint->setText(
+            rawError.isEmpty()
+                ? QStringLiteral("请启动 Docker Desktop")
+                : (rawError.size() > 120 ? rawError.left(120) + QStringLiteral("...") : rawError));
         m_dockerHint->setToolTip(rawError);
     }
 

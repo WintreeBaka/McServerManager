@@ -22,7 +22,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
-const { spawnSync } = require("child_process");
+const { execFileSync, spawnSync } = require("child_process");
 const readline = require("readline");
 
 /** 从安装目录里的 plugin.json 读版本号，避免升级插件后后端还报旧版本。 */
@@ -40,7 +40,7 @@ function readOwnManifest() {
 }
 
 const MANIFEST = readOwnManifest();
-const PLUGIN_ID = process.env.MCSM_PLUGIN_ID || MANIFEST.id || "com.mcsm.container-porter";
+const PLUGIN_ID = process.env.MCSM_PLUGIN_ID || MANIFEST.id || "com.mcsm.container-porter.cli";
 const BUNDLE_FORMAT = "mcsm-container-porter/1";
 // 管理器以后会注入 MCSM_PLUGIN_VERSION；在那之前从 plugin.json 读。
 const PLUGIN_VERSION = process.env.MCSM_PLUGIN_VERSION || MANIFEST.version || "0.0.0";
@@ -302,13 +302,47 @@ function readStore(root) {
     }
 }
 
-function writeStore(root, data) {
-    const file = storeFile(root);
-    const temp = file + ".porter-" + process.pid + ".tmp";
-    data.version = data.version || 1;
-    data.updatedAt = nowIso();
-    fs.writeFileSync(temp, JSON.stringify(data), "utf8");
-    fs.renameSync(temp, file);
+/// servers.json has one writer: the manager CLI. This also lets the standalone
+/// backend run with MCSM_BACKEND pointed at an installed mcsm-cli.
+function registerRecord(root, record, work) {
+    const backend = process.env.MCSM_BACKEND;
+    if (!backend) {
+        return { ok: false, error: "管理器没有提供受控后端路径（MCSM_BACKEND）" };
+    }
+    const file = path.join(work, "record-" + crypto.randomBytes(8).toString("hex") + ".json");
+    fs.writeFileSync(file, JSON.stringify(record), { encoding: "utf8", mode: 0o600 });
+    try {
+        let output = "";
+        try {
+            output = execFileSync(backend, ["--home", root, "server", "register", "--file", file], {
+                encoding: "utf8",
+                windowsHide: true,
+                timeout: 30000,
+                maxBuffer: 2 * 1024 * 1024
+            });
+        } catch (error) {
+            output = String((error && error.stdout) || "");
+            if (!output.trim()) {
+                return { ok: false, error: String((error && error.message) || error) };
+            }
+        }
+        const lines = output.trim().split(/\r?\n/).reverse();
+        for (const line of lines) {
+            try {
+                const parsed = JSON.parse(line);
+                if (parsed && Object.prototype.hasOwnProperty.call(parsed, "ok")) return parsed;
+            } catch (error) {
+                // keep looking for the final JSON envelope
+            }
+        }
+        return { ok: false, error: "mcsm-cli 没有返回 JSON 结果" };
+    } finally {
+        try {
+            fs.unlinkSync(file);
+        } catch (error) {
+            // work directory cleanup also handles this
+        }
+    }
 }
 
 function sanitizeRecord(record) {
@@ -750,13 +784,12 @@ function importContainer(request, file, flags) {
         if (imageRef) record.image = imageRef;
     }
 
-    servers.push(record);
-    try {
-        writeStore(root, store.data);
-    } catch (error) {
+    const registered = registerRecord(root, record, work);
+    if (!registered.ok) {
         cleanup(targetDir);
         cleanup(work);
-        return fail("STORE_WRITE_FAILED", "写入 servers.json 失败", String(error.message || error));
+        const info = (registered.error && registered.error.message) || registered.error;
+        return fail("STORE_WRITE_FAILED", "通过管理器注册服务器失败", String(info || "未知错误"));
     }
 
     cleanup(work);
@@ -774,15 +807,41 @@ function importContainer(request, file, flags) {
 
 // ------------------------------------------------------------- 其他方法 ---
 
-function scanBundles(request) {
+function tarOctal(buffer, offset, length) {
+    const raw = buffer.subarray(offset, offset + length).toString("ascii").replace(/\0.*$/, "").trim();
+    return raw ? parseInt(raw, 8) : 0;
+}
+
+async function readTarManifest(file) {
+    const handle = await fs.promises.open(file, "r");
+    try {
+        const header = Buffer.alloc(512);
+        const { bytesRead } = await handle.read(header, 0, 512, 0);
+        if (bytesRead !== 512) throw new Error("tar 头部不完整");
+        const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/, "").replace(/^\.\//, "");
+        if (name !== "manifest.json") throw new Error("容器包首项不是 manifest.json");
+        const size = tarOctal(header, 124, 12);
+        if (!Number.isFinite(size) || size < 2 || size > 1024 * 1024) {
+            throw new Error("manifest.json 大小异常");
+        }
+        const data = Buffer.alloc(size);
+        const read = await handle.read(data, 0, size, 512);
+        if (read.bytesRead !== size) throw new Error("manifest.json 不完整");
+        return JSON.parse(data.toString("utf8"));
+    } finally {
+        await handle.close();
+    }
+}
+
+async function scanBundles(request) {
     const root = dataRootOf(request);
     if (!root) return fail("NO_DATA_ROOT", "无法定位管理器数据目录");
     const dir = path.join(root, "exports");
-    fs.mkdirSync(dir, { recursive: true });
+    await fs.promises.mkdir(dir, { recursive: true });
 
     let names = [];
     try {
-        names = fs.readdirSync(dir).filter((name) => name.toLowerCase().endsWith(".tar"));
+        names = (await fs.promises.readdir(dir)).filter((name) => name.toLowerCase().endsWith(".tar"));
     } catch (error) {
         return fail("SCAN_FAILED", "无法读取导出目录", String(error.message || error));
     }
@@ -794,18 +853,15 @@ function scanBundles(request) {
         const full = path.join(dir, name);
         let stat = null;
         try {
-            stat = fs.statSync(full);
+            stat = await fs.promises.stat(full);
         } catch (error) {
             continue;
         }
         let info = {};
-        const manifestRun = run(TAR, ["-xOf", full, "manifest.json"], { timeout: 60000 });
-        if (manifestRun.ok) {
-            try {
-                info = JSON.parse(manifestRun.out);
-            } catch (error) {
-                info = {};
-            }
+        try {
+            info = await readTarManifest(full);
+        } catch (error) {
+            info = {};
         }
         items.push({
             file: full,
@@ -898,7 +954,10 @@ function handle(request) {
 }
 
 const rl = readline.createInterface({ input: process.stdin });
-rl.on("line", (line) => {
+rl.on("line", async (line) => {
+    if (Buffer.byteLength(line, "utf8") > 4 * 1024 * 1024) {
+        return reply(fail("REQUEST_TOO_LARGE", "请求超过 4 MiB 上限"));
+    }
     let request = {};
     try {
         request = JSON.parse(line);
@@ -907,7 +966,7 @@ rl.on("line", (line) => {
     }
     let result;
     try {
-        result = handle(request);
+        result = await handle(request);
     } catch (error) {
         console.error(error && error.stack ? error.stack : error);
         result = fail("INTERNAL_ERROR", "插件内部错误", "详见管理器日志");

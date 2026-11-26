@@ -7,7 +7,7 @@
 
     Examples:
         .\scripts\build-windows.ps1
-        .\scripts\build-windows.ps1 -QtDir "D:\qt\6.11.2\mingw_64"
+        .\scripts\build-windows.ps1 -QtDir "C:\Qt\6.8.3\mingw_64"
         .\scripts\build-windows.ps1 -QtDir "C:\Qt\6.6.3\msvc2019_64" -Deploy
 #>
 param(
@@ -20,6 +20,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path (Split-Path -Parent $PSScriptRoot) "tools\script-common.ps1")
 
 # Windows PowerShell 5.1 and PowerShell 7 both turn a native tool's stderr output into a
 # terminating error while ErrorActionPreference is Stop. CMake writes ordinary warnings
@@ -27,28 +28,8 @@ $ErrorActionPreference = "Stop"
 # after configure. The native calls at the end of this script therefore relax the
 # preference and use $LASTEXITCODE as the contract, so a warning stays a warning.
 
-function Find-QtKit {
-    $roots = @("C:\Qt", "D:\Qt", "D:\qt", (Join-Path $env:USERPROFILE "Qt"))
-    $candidates = @()
-    foreach ($root in $roots) {
-        if (-not (Test-Path $root)) { continue }
-        $candidates += Get-ChildItem $root -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match '^\d+\.\d+' } |
-            ForEach-Object { Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue } |
-            Where-Object { $_.Name -match '^(mingw|msvc)' }
-    }
-    if ($candidates.Count -eq 0) { return "" }
-    # newest Qt version first (guard against kits whose folder is not a version)
-    $ranked = try {
-        $candidates | Sort-Object { [version]($_.Parent.Name -replace '[^0-9.]', '') } -Descending
-    } catch {
-        $candidates
-    }
-    return ($ranked | Select-Object -First 1).FullName
-}
-
 if (-not $QtDir) {
-    $QtDir = Find-QtKit
+    $QtDir = Find-QtKit -ProjectRoot (Split-Path -Parent $PSScriptRoot)
     if (-not $QtDir) { throw "no Qt kit found; pass -QtDir <path to a Qt kit>" }
     Write-Host "auto-detected Qt kit: $QtDir" -ForegroundColor DarkGray
 }
@@ -105,7 +86,7 @@ if (-not $Generator) {
 
 if ($Reconfigure -and (Test-Path $BuildDir)) {
     Write-Host "removing previous build directory" -ForegroundColor DarkGray
-    Remove-Item -LiteralPath $BuildDir -Recurse -Force
+    Remove-ManagedDirectory -Path $BuildDir
 }
 
 $configureArgs = @("-S", ".", "-B", $BuildDir, "-DCMAKE_PREFIX_PATH=$QtDir", "-DCMAKE_BUILD_TYPE=$Config")
@@ -121,6 +102,9 @@ Write-Host ""
 Write-Host "==> configuring ($(if ($Generator) { $Generator } else { 'default generator' }), $Config)" -ForegroundColor Cyan
 & cmake @configureArgs
 $configureExit = $LASTEXITCODE
+if ($configureExit -eq 0) {
+    Set-ManagedMarker -Path $BuildDir
+}
 
 Write-Host "==> building" -ForegroundColor Cyan
 & cmake --build $BuildDir --parallel

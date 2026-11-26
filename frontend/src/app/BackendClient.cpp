@@ -10,6 +10,8 @@
 #include <QStandardPaths>
 #include <QTimer>
 
+#include "app/Constants.h"
+
 namespace mcsm {
 namespace {
 
@@ -19,7 +21,8 @@ const char *kBackendName = "mcsm-cli";
 /// pull) and `server start --wait`, short enough that a wedged backend process
 /// is cleaned up instead of leaking a handler (and a hidden process) forever.
 constexpr int kDefaultRequestTimeoutMs = 15 * 60 * 1000;
-
+// A crashed or hostile child must not grow the GUI without bound while it
+// emits a line that never terminates.
 QString withExtension(const QString &path)
 {
 #ifdef Q_OS_WIN
@@ -76,9 +79,14 @@ void consumeChunk(StreamState *state, const QByteArray &chunk, const BackendClie
     while (index >= 0) {
         const QByteArray line = state->buffer.left(index);
         state->buffer.remove(0, index + 1);
-        const QString text = QString::fromUtf8(line).trimmed();
-        if (!text.isEmpty())
+        QString text = QString::fromUtf8(line).trimmed();
+        if (text.size() > constants::kMaxDisplayLineChars)
+            text = text.left(constants::kMaxDisplayLineChars) + QStringLiteral("…[truncated]");
+        if (!text.isEmpty()) {
             state->rawLines << text;
+            if (state->rawLines.size() > constants::kMaxBufferedLines)
+                state->rawLines.removeFirst();
+        }
         if (text.startsWith(QLatin1Char('{'))) {
             QJsonParseError error {};
             const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8(), &error);
@@ -97,6 +105,15 @@ void consumeChunk(StreamState *state, const QByteArray &chunk, const BackendClie
             }
         }
         index = state->buffer.indexOf('\n');
+    }
+    if (state->buffer.size() > constants::kMaxPendingOutputBytes) {
+        QString oversized = QString::fromUtf8(
+            state->buffer.left(constants::kMaxDisplayLineChars)).trimmed();
+        if (!oversized.isEmpty())
+            state->rawLines << oversized + QStringLiteral("…[unterminated output truncated]");
+        while (state->rawLines.size() > constants::kMaxBufferedLines)
+            state->rawLines.removeFirst();
+        state->buffer.clear();
     }
 }
 
@@ -243,8 +260,13 @@ void BackendClient::request(const QStringList &arguments,
     QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), process,
                      [this, guard, state, args, handler, progress, delivered](int exitCode,
                                                                              QProcess::ExitStatus) {
-                         if (*delivered)
+                         if (*delivered) {
+                             if (guard) {
+                                 m_active.remove(guard.data());
+                                 guard->deleteLater();
+                             }
                              return;
+                         }
                          *delivered = true;
                          if (!guard)
                              return;
@@ -294,7 +316,6 @@ void BackendClient::request(const QStringList &arguments,
                          *delivered = true;
                          if (guard) {
                              guard->kill();
-                             guard->waitForFinished(2000);
                              consumeChunk(state.data(), guard->readAllStandardOutput(),
                                           ProgressHandler());
                              m_active.remove(guard.data());
@@ -310,7 +331,10 @@ void BackendClient::request(const QStringList &arguments,
                          if (handler)
                              handler(reply);
                          if (guard)
-                             guard->deleteLater();
+                             QTimer::singleShot(3000, guard.data(), [guard]() {
+                                 if (guard)
+                                     guard->deleteLater();
+                             });
                      });
     watchdog->setSingleShot(true);
     watchdog->setInterval(effectiveTimeout);
@@ -340,7 +364,9 @@ QProcess *BackendClient::streamLogs(const QString &serverId, int tail, QObject *
         while (index >= 0) {
             const QByteArray raw = buffer->left(index);
             buffer->remove(0, index + 1);
-            const QString line = QString::fromUtf8(raw).trimmed();
+            QString line = QString::fromUtf8(raw).trimmed();
+            if (line.size() > constants::kMaxDisplayLineChars)
+                line = line.left(constants::kMaxDisplayLineChars) + QStringLiteral("…[truncated]");
             if (!line.isEmpty() && onLine) {
                 if (line.startsWith(QLatin1Char('{'))) {
                     const QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8());
@@ -361,6 +387,17 @@ QProcess *BackendClient::streamLogs(const QString &serverId, int tail, QObject *
             }
             index = buffer->indexOf('\n');
         }
+        if (buffer->size() > constants::kMaxPendingOutputBytes && buffer->indexOf('\n') < 0) {
+            QJsonObject oversized;
+            oversized.insert(QStringLiteral("type"), QStringLiteral("log"));
+            oversized.insert(QStringLiteral("line"),
+                             QStringLiteral("%1…[unterminated log line truncated]")
+                                 .arg(QString::fromUtf8(
+                                     buffer->left(constants::kMaxDisplayLineChars)).trimmed()));
+            if (onLine)
+                onLine(oversized);
+            buffer->clear();
+        }
     });
 
     process->start();
@@ -374,9 +411,11 @@ QProcess *BackendClient::streamLogs(const QString &serverId, int tail, QObject *
                          process->deleteLater();
                      });
     QObject::connect(process, &QProcess::errorOccurred, process,
-                     [this, serverId](QProcess::ProcessError error) {
-                         if (error == QProcess::FailedToStart)
+                     [this, process, serverId](QProcess::ProcessError error) {
+                         if (error == QProcess::FailedToStart) {
                              emit streamFinished(serverId, QStringLiteral("无法启动日志流"));
+                             process->deleteLater();
+                         }
                      });
     return process;
 }

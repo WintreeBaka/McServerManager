@@ -16,6 +16,7 @@
 #include <thread>
 
 #include "app/BackendClient.h"
+#include "app/Constants.h"
 #include "widgets/Common.h"
 
 namespace mcsm {
@@ -252,7 +253,8 @@ QString PluginApi::selectedServer() const
 
 void PluginApi::refreshServers() const
 {
-    m_host->invokeBackend({QStringLiteral("server"), QStringLiteral("list")}, QJSValue(), m_engine);
+    m_host->invokeBackend(pluginId(), {QStringLiteral("server"), QStringLiteral("list")}, QJSValue(),
+                          m_engine);
 }
 
 void PluginApi::invoke(const QJSValue &command, const QJSValue &callback) const
@@ -262,7 +264,7 @@ void PluginApi::invoke(const QJSValue &command, const QJSValue &callback) const
         log(QStringLiteral("invoke 需要命令字符串或参数数组"));
         return;
     }
-    m_host->invokeBackend(arguments, callback, m_engine);
+    m_host->invokeBackend(pluginId(), arguments, callback, m_engine);
 }
 
 void PluginApi::on(const QString &event, const QJSValue &handler)
@@ -283,7 +285,7 @@ QJSValue PluginApi::include(const QString &relativePath)
         log(QStringLiteral("include 只允许插件目录内的相对路径：%1").arg(relativePath));
         return QJSValue(QJSValue::UndefinedValue);
     }
-    const QString path = QDir(base).filePath(relativePath);
+    const QString path = QDir(base).filePath(normalized);
     const QString canonicalBase = QFileInfo(base).canonicalFilePath();
     const QString canonicalPath = QFileInfo(path).canonicalFilePath();
     if (canonicalBase.isEmpty() || canonicalPath.isEmpty()
@@ -603,7 +605,11 @@ void PluginHost::setPageContent(const QString &pageId, const QJsonArray &blocks)
 {
     if (pageId.isEmpty())
         return;
-    m_pageContent.insert(pageId, blocks);
+    QJsonArray bounded;
+    const int count = qMin(blocks.size(), constants::kMaxPluginPageBlocks);
+    for (int index = 0; index < count; ++index)
+        bounded.append(blocks.at(index));
+    m_pageContent.insert(pageId, bounded);
     emit pageContentChanged(pageId);
 }
 
@@ -617,14 +623,15 @@ void PluginHost::reportLog(const QString &pluginId, const QString &message)
     emit pluginMessage(pluginId, message);
 }
 
-void PluginHost::invokeBackend(const QStringList &arguments, const QJSValue &callback,
-                               QJSEngine *engine)
+void PluginHost::invokeBackend(const QString &pluginId, const QStringList &arguments,
+                               const QJSValue &callback, QJSEngine *engine)
 {
     if (!m_backend || arguments.isEmpty())
         return;
     const quint64 generation = m_generation;
     QPointer<QJSEngine> engineGuard(engine);
-    m_backend->request(arguments, this, [callback, engineGuard, generation, this](const Reply &reply) {
+    m_backend->request(arguments, this,
+                       [callback, engineGuard, generation, pluginId, this](const Reply &reply) {
         // The plugin was reloaded/unloaded while the request was in flight:
         // the engine (and the QJSValue callback) are gone.
         if (generation != m_generation || !engineGuard)
@@ -638,7 +645,7 @@ void PluginHost::invokeBackend(const QStringList &arguments, const QJSValue &cal
         argument.setProperty(QStringLiteral("warnings"), liveEngine->toScriptValue(reply.warnings));
         argument.setProperty(QStringLiteral("error"), reply.ok ? QString() : reply.errorText());
         argument.setProperty(QStringLiteral("code"), reply.code);
-        callback.call({argument});
+        dispatchOne(pluginId, liveEngine, callback, argument);
     });
 }
 

@@ -239,7 +239,15 @@ QWidget *ServersPage::buildDetailCard()
         setBusy(true, QStringLiteral("正在重启…"));
         AppContext::instance()->backend()->request(
             {QStringLiteral("server"), QStringLiteral("stop"), QStringLiteral("--id"), id}, this,
-            [this, id](const Reply &) { requestStart(id); });
+            [this, id](const Reply &reply) {
+                if (!reply.ok) {
+                    setBusy(false);
+                    m_logPreview->appendLine(QStringLiteral("[错误] 重启前停止失败：%1")
+                                                 .arg(reply.errorText()));
+                    return;
+                }
+                requestStart(id);
+            });
     });
     connect(m_killButton, &QPushButton::clicked, this, [this]() {
         if (!m_current.id.isEmpty())
@@ -410,8 +418,11 @@ void ServersPage::loadDetail(const QString &serverId)
             // repaint the detail panel of the current one.
             if (AppContext::instance()->selectedServerId() != serverId)
                 return;
-            if (!reply.ok)
+            if (!reply.ok) {
+                m_logPreview->setLogLines(
+                    {QStringLiteral("[错误] 无法加载服务器详情：%1").arg(reply.errorText())});
                 return;
+            }
             ServerInfo info = ServerInfo::fromJson(reply.data);
             if (info.id.isEmpty())
                 info.id = serverId;

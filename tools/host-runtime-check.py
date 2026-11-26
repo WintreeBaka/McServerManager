@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -18,9 +19,37 @@ import time
 EXE = os.path.join("build", "bin", "mcsm-cli.exe")
 
 
+def runtime_dirs() -> list[str]:
+    """Find Qt and MinGW without baking the developer machine's drive into PATH."""
+    candidates: list[str] = []
+    explicit = [os.environ.get("MCSM_QT_BIN", ""), os.environ.get("MCSM_MINGW_BIN", "")]
+    candidates.extend(path for path in explicit if path)
+
+    cache = Path("build") / "CMakeCache.txt"
+    if cache.is_file():
+        text = cache.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            if line.startswith("Qt6_DIR:PATH="):
+                candidates.append(str(Path(line.split("=", 1)[1]).parents[2] / "bin"))
+            elif line.startswith("CMAKE_CXX_COMPILER:FILEPATH="):
+                candidates.append(str(Path(line.split("=", 1)[1]).parent))
+
+    qt_root = os.environ.get("QT_ROOT", "")
+    if qt_root:
+        root = Path(qt_root)
+        if (root / "bin" / "Qt6Core.dll").is_file():
+            candidates.append(str(root / "bin"))
+        tools = root / "Tools"
+        if tools.is_dir():
+            for mingw in sorted(tools.glob("mingw*"), reverse=True):
+                candidates.append(str(mingw / "bin"))
+    return list(dict.fromkeys(path for path in candidates if Path(path).is_dir()))
+
+
 def environment() -> dict:
     env = dict(os.environ)
-    env["PATH"] = r"D:\qt\6.11.2\mingw_64\bin;D:\qt\Tools\mingw1310_64\bin;" + env.get("PATH", "")
+    parts = runtime_dirs() + [env.get("PATH", "")]
+    env["PATH"] = os.pathsep.join(parts)
     return env
 
 

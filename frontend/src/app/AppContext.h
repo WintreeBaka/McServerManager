@@ -116,12 +116,14 @@ private:
     static void applyComboPopupStyle(QApplication *application);
     void loadSettings();
     void saveSettings();
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
     BackendClient *m_backend = nullptr;
     ServerModel *m_servers = nullptr;
     PluginHost *m_plugins = nullptr;
     QSettings *m_settings = nullptr;
     QTimer m_pollTimer;
+    QTimer m_settingsSyncTimer;
     QHash<QString, QElapsedTimer> m_throttles;
     QElapsedTimer m_environmentTimer;
     QPointer<QProcess> m_daemon;

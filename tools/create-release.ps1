@@ -18,7 +18,7 @@
     已存在同名 Release 时会复用并补传缺失的附件，不会重复创建。
 #>
 param(
-    [string]$Version = "1.2.3",
+    [string]$Version = "",
     [string]$Repo = "WintreeBaka/McServerManager",
     [string]$Tag = "",
     [string]$Title = "",
@@ -30,6 +30,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "script-common.ps1")
+if (-not $Version) { $Version = Get-ProjectVersion -ProjectRoot $projectRoot }
 
 if (-not $Tag) { $Tag = "v$Version" }
 if (-not $Title) { $Title = "McServerManager $Version · Windows 便携版" }
@@ -39,7 +42,9 @@ if ($Assets.Count -eq 0) {
     # own never publishes a release that is missing the CLI build or the plugin zip
     $Assets = @(
         "dist\McServerManager-$Version-win64.zip",
+        "dist\McServerManager-$Version-win64.zip.sha256",
         "dist\McServerManager-$Version-win64-cli.zip",
+        "dist\McServerManager-$Version-win64-cli.zip.sha256",
         "docs\PLUGIN-SDK.md",
         "dist\plugins\com.mcsm.player-admin-1.1.0.zip"
     )

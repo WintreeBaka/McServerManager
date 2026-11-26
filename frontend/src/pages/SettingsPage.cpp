@@ -740,12 +740,9 @@ void SettingsPage::openPath(const QString &path)
 
 void SettingsPage::detectEnvironment()
 {
-    // Rate limited inside AppContext: `doctor` shells out to docker, so running
-    // it on every page activation made rapid switching expensive.
-    AppContext *context = AppContext::instance();
-    context->refreshEnvironment();
-    if (!context->environment().isEmpty())
-        applyDoctor(context->environment());
+    // AppContext emits environmentChanged once the shared request finishes.
+    // Applying the cached value here as well caused duplicate same-frame redraws.
+    AppContext::instance()->refreshEnvironment();
 }
 
 void SettingsPage::applyDoctor(const QJsonObject &doctor)

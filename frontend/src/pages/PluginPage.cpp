@@ -226,8 +226,10 @@ void PluginPage::loadInstalled(const QString &serverId)
             if (serverId != m_serverId)
                 return;     // stale list for the previous server
             m_installed->clear();
-            if (!reply.ok)
+            if (!reply.ok) {
+                m_statusLabel->setText(QStringLiteral("读取已安装插件失败：%1").arg(reply.errorText()));
                 return;
+            }
             const QJsonArray plugins = reply.data.value(QStringLiteral("plugins")).toArray();
             for (const QJsonValue &value : plugins) {
                 const QJsonObject plugin = value.toObject();

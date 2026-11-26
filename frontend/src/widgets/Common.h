@@ -11,10 +11,14 @@
 class QLabel;
 class QVBoxLayout;
 class QHBoxLayout;
+class QListWidget;
 class QPropertyAnimation;
 class QScrollArea;
 
 namespace mcsm {
+
+/// Keep height-for-width row widgets inside padded QListWidget items.
+void relayoutListRows(QListWidget *list);
 
 /// Rounded surface with optional hover lift and gradient fill.
 class CardFrame : public QFrame

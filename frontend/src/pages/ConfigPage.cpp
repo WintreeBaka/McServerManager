@@ -22,6 +22,7 @@
 #include "app/AppContext.h"
 #include "widgets/AnimatedStack.h"
 #include "widgets/Chip.h"
+#include "widgets/Common.h"
 
 namespace mcsm {
 namespace {
@@ -301,8 +302,10 @@ void ConfigPage::buildFields(const QJsonArray &fields)
         } else if (type == QLatin1String("choice")) {
             auto *combo = new QComboBox(row);
             const QJsonArray options = field.value(QStringLiteral("options")).toArray();
-            for (const QJsonValue &option : options)
-                combo->addItem(option.toString());
+            for (const QJsonValue &option : options) {
+                const QString text = option.toString();
+                combo->addItem(text, text);
+            }
             combo->setMinimumWidth(180);
             editor = combo;
         } else {
@@ -420,7 +423,8 @@ QString ConfigPage::editorValue(const QString &key) const
     if (auto *spin = qobject_cast<QSpinBox *>(editor))
         return QString::number(spin->value());
     if (auto *combo = qobject_cast<QComboBox *>(editor))
-        return combo->currentText();
+        return combo->currentData().toString().isEmpty() ? combo->currentText()
+                                                        : combo->currentData().toString();
     if (auto *edit = qobject_cast<QLineEdit *>(editor))
         return edit->text();
     return QString();
@@ -445,8 +449,10 @@ void ConfigPage::setEditorValue(const QString &key, const QString &value)
         const int index = combo->findText(value);
         if (index >= 0)
             combo->setCurrentIndex(index);
-        else if (!value.isEmpty())
-            combo->setCurrentText(value);
+        else if (!value.isEmpty()) {
+            combo->addItem(QStringLiteral("%1（当前值/未识别）").arg(value), value);
+            combo->setCurrentIndex(combo->count() - 1);
+        }
         return;
     }
     if (auto *edit = qobject_cast<QLineEdit *>(editor))
@@ -666,27 +672,7 @@ void ConfigPage::setBusy(bool busy)
 
 void ConfigPage::relayoutHistoryRows()
 {
-    if (!m_historyList)
-        return;
-    // The theme style sheet gives every list item a padding (6px right now) and the view
-    // places the row widget *inside* that padded rect, so the size hint has to carry the
-    // padding twice. Measured: a 300x76 hint produced a 288x64 widget, which cut the
-    // bottom off the "回滚到此版本" button.
-    constexpr int kItemPadding = 6;
-    const int contentWidth = qMax(160, m_historyList->viewport()->width() - 2 * kItemPadding);
-    for (int i = 0; i < m_historyList->count(); ++i) {
-        QListWidgetItem *item = m_historyList->item(i);
-        QWidget *row = m_historyList->itemWidget(item);
-        if (!item || !row)
-            continue;
-        int height = row->layout() ? row->layout()->heightForWidth(contentWidth) : -1;
-        if (height <= 0)
-            height = row->sizeHint().height();
-        // two extra pixels of slack so rounding never eats into the last widget
-        const QSize wanted(contentWidth + 2 * kItemPadding, height + 2 * kItemPadding + 2);
-        if (item->sizeHint() != wanted)
-            item->setSizeHint(wanted);
-    }
+    relayoutListRows(m_historyList);
 }
 
 void ConfigPage::resizeEvent(QResizeEvent *event)

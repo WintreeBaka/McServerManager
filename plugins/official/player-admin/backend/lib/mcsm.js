@@ -126,10 +126,23 @@ function loadServers(root) {
 }
 
 function serverDir(root, record) {
-    if (record && record.dir) {
-        return record.dir;
+    const realOrResolved = (value) => {
+        try {
+            return fs.realpathSync(value);
+        } catch (error) {
+            return path.resolve(value);
+        }
+    };
+    const serversRoot = realOrResolved(path.resolve(root, "servers"));
+    const resolvedCandidate = record && record.dir
+        ? path.resolve(record.dir)
+        : path.resolve(serversRoot, record ? String(record.id) : "");
+    const candidate = realOrResolved(resolvedCandidate);
+    const relative = path.relative(serversRoot, candidate);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("服务器目录不在管理的 servers 目录内，已拒绝访问：" + candidate);
     }
-    return path.join(root, "servers", record ? String(record.id) : "");
+    return candidate;
 }
 
 function serverFile(root, record, name) {
@@ -291,8 +304,7 @@ function withDashes(raw) {
         .join("-");
 }
 
-/// 依次查找：本地缓存 -> Mojang 档案接口 -> 离线 UUID。
-/// 返回 { uuid, source }，source 用于把不确定性写进 warnings。
+/// 依次查找：本地缓存 -> Mojang 档案接口；在线模式绝不以离线 UUID 猜测。
 async function resolveUuid(root, record, name, options) {
     const opts = options || {};
 
@@ -317,7 +329,8 @@ async function resolveUuid(root, record, name, options) {
             return { uuid: remote, source: "mojang" };
         }
     }
-    return { uuid: offlineUuid(name), source: "offline-guess" };
+    throw new Error("在线模式无法从 Mojang 解析 " + name +
+                    " 的 UUID；请检查网络后重试，或在线服务器运行时通过 RCON 操作");
 }
 
 function mojangUuid(name) {
@@ -550,6 +563,11 @@ async function performAction(root, record, action, player, value, value2, option
         online = { ok: false, error: String(error) };
     }
     const running = online.ok;
+    if (!online.ok && String(record.status || "").toLowerCase() === "running") {
+        return done(false,
+                    "服务器正在运行但 RCON 不可用，已拒绝直接修改玩家文件。请在 server.properties 中启用 enable-rcon=true 并配置 rcon.password 后重启服务器",
+                    "", "rcon", warnings);
+    }
 
     async function rcon(command) {
         const response = await rconExec(root, record, command);
@@ -768,7 +786,11 @@ async function buildDashboard(root, want, options) {
 
     if (!rcon.ok) {
         warnings.push("无法连接 RCON：" + rcon.error);
-        warnings.push("名单类操作仍可用（直接写名单文件），但踢出 / 标题 / 私信等需要服务器处于运行状态");
+        if (String(record.status || "").toLowerCase() === "running") {
+            warnings.push("服务器记录为运行中但 RCON 不可用；玩家操作会被拒绝，请启用 enable-rcon 并配置 rcon.password 后重启");
+        } else {
+            warnings.push("服务器未运行；名单操作会写入磁盘文件并在下次启动时生效，需要在线执行的操作不可用");
+        }
     }
 
     return {

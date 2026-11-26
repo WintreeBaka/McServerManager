@@ -4,7 +4,10 @@
 Useful when the manager reports an RCON timeout: it shows whether the server
 answered, and with which packet layout.
 
-    python tools/rcon-probe.py 127.0.0.1 25575 <rcon-password> [command]
+    MCSM_RCON_PASSWORD=secret python tools/rcon-probe.py 127.0.0.1 25575 [command]
+
+The password is read from MCSM_RCON_PASSWORD or an interactive prompt, never
+from argv. Authentication bodies are redacted from the packet dump.
 """
 
 from __future__ import annotations
@@ -12,6 +15,8 @@ from __future__ import annotations
 import socket
 import struct
 import sys
+from getpass import getpass
+import os
 
 
 def build_packet(request_id: int, packet_type: int, body: bytes) -> bytes:
@@ -39,18 +44,23 @@ def receive(sock: socket.socket) -> tuple[int, int, bytes]:
 def main() -> int:
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 25575
-    password = sys.argv[3] if len(sys.argv) > 3 else ""
-    command = sys.argv[4] if len(sys.argv) > 4 else "list"
+    command = sys.argv[3] if len(sys.argv) > 3 else "list"
+    password = os.environ.get("MCSM_RCON_PASSWORD", "")
+    if not password:
+        password = getpass("RCON password: ")
+    if not password:
+        print("RCON password is empty; refusing to send an authentication packet.", file=sys.stderr)
+        return 4
 
     sock = socket.create_connection((host, port), timeout=8)
     print(f"connected to {host}:{port}")
 
     auth = build_packet(1, 3, password.encode("utf-8"))
-    print(f"auth packet  ({len(auth)} bytes): {auth.hex(' ')}")
+    print(f"auth packet  ({len(auth)} bytes; body redacted)")
     sock.sendall(auth)
     try:
         request_id, packet_type, body = receive(sock)
-        print(f"auth reply   id={request_id} type={packet_type} body={body!r}")
+        print(f"auth reply   id={request_id} type={packet_type} body=<redacted>")
         if request_id == -1:
             print("=> authentication FAILED (wrong password)")
             return 2
@@ -59,7 +69,7 @@ def main() -> int:
         return 3
 
     request = build_packet(2, 2, command.encode("utf-8"))
-    print(f"command      {command!r} ({len(request)} bytes): {request.hex(' ')}")
+    print(f"command      {command!r} ({len(request)} bytes)")
     sock.sendall(request)
     try:
         request_id, packet_type, body = receive(sock)

@@ -146,14 +146,20 @@ bool RconClient::authenticate(QString *error)
     }
 
     int id = 0;
-    int type = 0;
+    int type = -1;
     QByteArray body;
     QString readError;
-    if (!readPacket(&id, &type, &body, &readError)) {
-        m_lastError = readError;
-        if (error)
-            *error = readError;
-        return false;
+    // Some servers emit an empty RESPONSE_VALUE before AUTH_RESPONSE. Keep the
+    // handshake bounded while skipping packets that cannot carry the auth result.
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        if (!readPacket(&id, &type, &body, &readError)) {
+            m_lastError = readError;
+            if (error)
+                *error = readError;
+            return false;
+        }
+        if (id == -1 || type == AuthResponse)
+            break;
     }
     if (id == -1) {
         m_lastError = QStringLiteral("RCON 密码错误");
@@ -179,10 +185,19 @@ bool RconClient::sendCommand(const QString &command, QString *response, QString 
         return false;
 
     int id = 0;
-    int type = 0;
+    int type = -1;
     QByteArray body;
-    if (!readPacket(&id, &type, &body, error))
+    // Minecraft may leave an AUTH_RESPONSE queued after authentication. Read
+    // through it and stop on the first actual RESPONSE_VALUE packet.
+    for (int attempt = 0; attempt < 4 && type != ResponseValue; ++attempt) {
+        if (!readPacket(&id, &type, &body, error))
+            return false;
+    }
+    if (type != ResponseValue) {
+        if (error)
+            *error = QStringLiteral("rcon did not return a response packet");
         return false;
+    }
     if (response)
         *response = QString::fromUtf8(body);
     return true;

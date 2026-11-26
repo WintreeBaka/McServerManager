@@ -12,8 +12,8 @@
 #>
 param(
     [string]$Exe = ".\build\bin\McServerManager.exe",
-    [string]$QtBin = "D:\qt\6.11.2\mingw_64\bin",
-    [string]$MinGwBin = "D:\qt\Tools\mingw1310_64\bin",
+    [string]$QtBin = "",
+    [string]$MinGwBin = "",
     [int]$Seconds = 9,
     [string]$Screenshot = "",
     [string]$Page = "",
@@ -24,6 +24,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "script-common.ps1")
 $failed = 0
 
 function Write-Result {
@@ -39,12 +41,13 @@ function Write-Result {
 if (-not (Test-Path $Exe)) { throw "GUI executable not found: $Exe (build first)" }
 $Exe = (Resolve-Path $Exe).Path
 
-if ($QtBin -and (Test-Path $QtBin)) {
-    $env:PATH = "$QtBin;$env:PATH"
-} elseif ($QtBin) {
-    Write-Warning "Qt bin not found: $QtBin"
+if (-not $QtBin -or -not $MinGwBin) {
+    $qtKit = if ($QtBin) { Split-Path -Parent $QtBin } else { Find-QtKit -ProjectRoot $projectRoot }
+    $runtime = Resolve-QtRuntime -QtKit $qtKit
+    if (-not $QtBin) { $QtBin = $runtime.Bin }
+    if (-not $MinGwBin) { $MinGwBin = $runtime.MinGwBin }
 }
-if ($MinGwBin -and (Test-Path $MinGwBin)) { $env:PATH = "$MinGwBin;$env:PATH" }
+Add-RuntimePath @($QtBin, $MinGwBin)
 
 Write-Host ""
 Write-Host "McServerManager GUI smoke test" -ForegroundColor Cyan
@@ -63,16 +66,61 @@ Start-Sleep -Seconds 3
 Write-Result "process is alive after 3s" (-not $process.HasExited) `
     ("exit code " + $process.ExitCode)
 
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class WindowFinder {
+    private delegate bool EnumProc(IntPtr handle, IntPtr parameter);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr handle, out RECT rect);
+
+    public static IntPtr FindLargestTitled(int processId, out string title) {
+        IntPtr best = IntPtr.Zero;
+        string bestTitle = "";
+        long bestArea = 0;
+        EnumWindows(delegate(IntPtr handle, IntPtr parameter) {
+            uint owner = 0;
+            GetWindowThreadProcessId(handle, out owner);
+            if (owner != processId || !IsWindowVisible(handle))
+                return true;
+            var text = new StringBuilder(512);
+            GetWindowText(handle, text, text.Capacity);
+            if (text.Length == 0)
+                return true;
+            RECT rect;
+            if (!GetWindowRect(handle, out rect))
+                return true;
+            long area = (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);
+            if (area > bestArea) {
+                best = handle;
+                bestTitle = text.ToString();
+                bestArea = area;
+            }
+            return true;
+        }, IntPtr.Zero);
+        title = bestTitle;
+        return best;
+    }
+}
+"@
+
 $handle = [IntPtr]::Zero
+$windowTitle = ""
 for ($i = 0; $i -lt 20 -and $handle -eq [IntPtr]::Zero; $i++) {
     Start-Sleep -Milliseconds 400
     $process.Refresh()
     if ($process.HasExited) { break }
-    $handle = $process.MainWindowHandle
+    $handle = [WindowFinder]::FindLargestTitled($process.Id, [ref]$windowTitle)
 }
-Write-Result "main window created" ($handle -ne [IntPtr]::Zero) "no MainWindowHandle"
-Write-Result "window has a title" (-not [string]::IsNullOrWhiteSpace($process.MainWindowTitle)) `
-    "empty MainWindowTitle"
+Write-Result "main window created" ($handle -ne [IntPtr]::Zero) "no visible titled window"
+Write-Result "window has a title" (-not [string]::IsNullOrWhiteSpace($windowTitle)) `
+    "empty window title"
 
 Start-Sleep -Seconds ([Math]::Max(0, $Seconds - 4))
 $process.Refresh()

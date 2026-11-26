@@ -14,7 +14,7 @@
 #>
 param(
     [string]$Exe = ".\build\bin\McServerManager.exe",
-    [string]$QtBin = "D:\qt\6.11.2\mingw_64\bin",
+    [string]$QtBin = "",
     [int]$IdleSeconds = 4,
     [int]$Seconds = 12,
     [int]$IntervalMs = 260,
@@ -26,9 +26,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "script-common.ps1")
 if (-not (Test-Path $Exe)) { throw "GUI executable not found: $Exe" }
 $Exe = (Resolve-Path $Exe).Path
-if ($QtBin -and (Test-Path $QtBin)) { $env:PATH = "$QtBin;$env:PATH" }
+if (-not $QtBin) {
+    $runtime = Resolve-QtRuntime -QtKit (Find-QtKit -ProjectRoot $projectRoot)
+    $QtBin = $runtime.Bin
+}
+Add-RuntimePath @($QtBin)
 
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @"

@@ -4,6 +4,7 @@
 #include <QVector>
 
 class QPropertyAnimation;
+class QTimer;
 
 namespace mcsm {
 
@@ -46,6 +47,7 @@ private:
     int m_maxLines = 4000;
     bool m_follow = true;
     QPropertyAnimation *m_scrollAnimation = nullptr;
+    QTimer *m_filterTimer = nullptr;
 };
 
 } // namespace mcsm

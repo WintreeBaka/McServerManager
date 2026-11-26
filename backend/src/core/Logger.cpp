@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
@@ -19,6 +20,35 @@ bool g_verbose = false;
 bool g_quiet = false;
 QString g_context;
 QString g_lastError;
+QByteArray g_pendingFileOutput;
+QElapsedTimer g_flushTimer;
+
+void flushFileOutputLocked()
+{
+    if (g_pendingFileOutput.isEmpty())
+        return;
+    const QString path = AppPaths::logFilePath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Append)) {
+        file.write(g_pendingFileOutput);
+        file.close();
+    }
+    g_pendingFileOutput.clear();
+    g_flushTimer.restart();
+
+    if (QFileInfo(path).size() <= 8LL * 1024 * 1024)
+        return;
+    QFile::remove(path + QStringLiteral(".3"));
+    for (int generation = 2; generation >= 1; --generation) {
+        const QString source = path + QStringLiteral(".%1").arg(generation);
+        const QString target = path + QStringLiteral(".%1").arg(generation + 1);
+        QFile::remove(target);
+        if (QFileInfo::exists(source))
+            QFile::rename(source, target);
+    }
+    QFile::rename(path, path + QStringLiteral(".1"));
+}
 
 QString levelName(LogLevel level)
 {
@@ -36,8 +66,15 @@ QString levelName(LogLevel level)
 void Logger::init(bool verbose, bool quiet)
 {
     QMutexLocker locker(&g_mutex);
+    flushFileOutputLocked();
     g_verbose = verbose;
     g_quiet = quiet;
+}
+
+void Logger::flush()
+{
+    QMutexLocker locker(&g_mutex);
+    flushFileOutputLocked();
 }
 
 void Logger::setCommandContext(const QString &context)
@@ -69,19 +106,13 @@ void Logger::log(LogLevel level, const QString &scope, const QString &message)
         fflush(stderr);
     }
 
-    const QString path = AppPaths::logFilePath();
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Append))
-        return;
-    file.write(line.toUtf8());
-    file.write("\n");
-    file.close();
-
-    if (file.size() > 8LL * 1024 * 1024) {
-        QFile::remove(path + QStringLiteral(".1"));
-        QFile::rename(path, path + QStringLiteral(".1"));
-    }
+    g_pendingFileOutput += line.toUtf8();
+    g_pendingFileOutput += '\n';
+    const bool shouldFlush = level == LogLevel::Warn || level == LogLevel::Error
+        || g_pendingFileOutput.size() >= 64 * 1024 || !g_flushTimer.isValid()
+        || g_flushTimer.elapsed() >= 500;
+    if (shouldFlush)
+        flushFileOutputLocked();
 }
 
 void Logger::debug(const QString &scope, const QString &message) { log(LogLevel::Debug, scope, message); }

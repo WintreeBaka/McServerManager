@@ -1,6 +1,7 @@
 #include "server/ServerRecord.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QStringList>
 
@@ -217,6 +218,27 @@ bool ServerRecord::isValid(QString *error) const
     if (dir.isEmpty()) {
         if (error)
             *error = QStringLiteral("dir is required");
+        return false;
+    }
+    const QString canonicalRoot =
+        QFileInfo(QDir(AppPaths::serversDir()).absolutePath()).canonicalFilePath();
+    const QString canonicalDir = QFileInfo(dir).canonicalFilePath();
+    const QString root = canonicalRoot.isEmpty()
+                             ? QDir::cleanPath(QDir(AppPaths::serversDir()).absolutePath())
+                             : canonicalRoot;
+    const QString candidate =
+        canonicalDir.isEmpty() ? QDir::cleanPath(QFileInfo(dir).absoluteFilePath()) : canonicalDir;
+    const QString relative = QDir(root).relativeFilePath(candidate);
+    if (relative.isEmpty() || relative == QLatin1String("..")
+        || relative.startsWith(QLatin1String("../")) || QDir::isAbsolutePath(relative)) {
+        if (error)
+            *error = QStringLiteral("dir must stay inside %1").arg(root);
+        return false;
+    }
+    if (jarName.isEmpty() || QFileInfo(jarName).fileName() != jarName
+        || jarName == QLatin1String(".") || jarName == QLatin1String("..")) {
+        if (error)
+            *error = QStringLiteral("jarName must be a plain file name");
         return false;
     }
     return true;

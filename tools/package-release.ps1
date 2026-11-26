@@ -17,14 +17,23 @@
 param(
     [string]$BinDir = "build\bin",
     [string]$DistDir = "dist",
-    [string]$Version = "1.2.3",
+    [string]$Version = "",
     [ValidateSet("plain", "with-plugins", "with-container-porter", "cli")]
     [string]$Flavor = "plain",
-    [string]$QtBin = "D:\qt\6.11.2\mingw_64\bin",
-    [string]$MinGwBin = "D:\qt\Tools\mingw1310_64\bin"
+    [string]$QtBin = "",
+    [string]$MinGwBin = ""
 )
 
 $ErrorActionPreference = "Stop"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "script-common.ps1")
+if (-not $Version) { $Version = Get-ProjectVersion -ProjectRoot $projectRoot }
+if (-not $QtBin -or -not $MinGwBin) {
+    $qtKit = if ($QtBin) { Split-Path -Parent $QtBin } else { Find-QtKit -ProjectRoot $projectRoot }
+    $runtime = Resolve-QtRuntime -QtKit $qtKit
+    if (-not $QtBin) { $QtBin = $runtime.Bin }
+    if (-not $MinGwBin) { $MinGwBin = $runtime.MinGwBin }
+}
 
 & (Join-Path $PSScriptRoot "verify-third-party.ps1")
 
@@ -38,8 +47,8 @@ if (-not (Test-Path (Join-Path $BinDir "Qt6Core.dll"))) {
 $suffix = if ($Flavor -eq "with-plugins") { "-with-plugins" } elseif ($Flavor -eq "with-container-porter") { "-with-container-porter" } elseif ($Flavor -eq "cli") { "-cli" } else { "" }
 $name = "McServerManager-$Version-win64$suffix"
 $stage = Join-Path $DistDir $name
-if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
-New-Item -ItemType Directory -Path $stage -Force | Out-Null
+if (Test-Path $stage) { Remove-ManagedDirectory -Path $stage }
+Set-ManagedMarker -Path $stage
 
 if ($Flavor -eq "cli") {
     # Slim build: only the CLI plus the Qt modules it actually links (Core/Network).
@@ -64,7 +73,8 @@ if ($Flavor -eq "cli") {
 }
 
 $quickstart = if ($Flavor -eq "cli") { "packaging\QUICKSTART-CLI.txt" } else { "packaging\QUICKSTART.txt" }
-foreach ($extra in @("README.md", $quickstart, "THIRD_PARTY_NOTICES.md", "LICENSE")) {
+foreach ($extra in @("README.md", $quickstart, "THIRD_PARTY_NOTICES.md", "LICENSE",
+                     "third_party\LGPL-3.0.txt")) {
     if (Test-Path $extra) {
         Copy-Item $extra -Destination $stage -Force
     }
@@ -168,12 +178,16 @@ $zipPath = Join-Path $DistDir "$name.zip"
 if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Write-Host "compressing..." -ForegroundColor Cyan
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zipPath -CompressionLevel Optimal
+$shaPath = "$zipPath.sha256"
+$shaLine = "{0}  {1}" -f (Get-Sha256File -Path $zipPath), (Split-Path $zipPath -Leaf)
+Set-Content -LiteralPath $shaPath -Value $shaLine -Encoding ASCII
 
 $zipSize = (Get-Item $zipPath).Length
 Write-Host ""
 Write-Host "release ready:" -ForegroundColor Green
 Write-Host ("  folder : {0}  ({1} files, {2:N1} MB)" -f $stage, $fileCount, ($total / 1MB))
 Write-Host ("  zip    : {0}  ({1:N1} MB)" -f $zipPath, ($zipSize / 1MB))
+Write-Host ("  sha256 : {0}" -f $shaPath)
 Write-Host ""
 Write-Host "contents:" -ForegroundColor DarkGray
 Get-ChildItem $stage | Sort-Object Name | ForEach-Object {

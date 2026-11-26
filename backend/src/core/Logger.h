@@ -13,6 +13,7 @@ class Logger
 {
 public:
     static void init(bool verbose, bool quiet);
+    static void flush();
     static void log(LogLevel level, const QString &scope, const QString &message);
 
     static void debug(const QString &scope, const QString &message);

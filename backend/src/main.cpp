@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("mcsm-cli"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.2.3"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(MCSM_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("McServerManager"));
 
     // Global flags are parsed manually so that command specific flags can be
@@ -126,18 +126,23 @@ int main(int argc, char *argv[])
 
     // long running helpers
     if (args.positional(0) == QLatin1String("daemon")) {
-        return Scheduler::runDaemon(args.intValue(QStringLiteral("interval"), 60),
-                                    args.boolValue(QStringLiteral("once"), false),
-                                    args.boolValue(QStringLiteral("verbose"), false),
-                                    args.bigint(QStringLiteral("parent-pid"), 0));
+        const int code = Scheduler::runDaemon(args.intValue(QStringLiteral("interval"), 60),
+                                              args.boolValue(QStringLiteral("once"), false),
+                                              args.boolValue(QStringLiteral("verbose"), false),
+                                              args.bigint(QStringLiteral("parent-pid"), 0));
+        Logger::flush();
+        return code;
     }
     if (args.positional(0) == QLatin1String("server") && args.positional(1) == QLatin1String("logs")
         && args.boolValue(QStringLiteral("follow"), false)) {
-        return streamContainerLogs(args.value(QStringLiteral("id"), args.positional(2)),
-                                   args.intValue(QStringLiteral("tail"), 200));
+        const int code = streamContainerLogs(args.value(QStringLiteral("id"), args.positional(2)),
+                                             args.intValue(QStringLiteral("tail"), 200));
+        Logger::flush();
+        return code;
     }
 
     const Result result = router.run();
     emitResult(result, args.boolValue(QStringLiteral("pretty"), false));
+    Logger::flush();
     return result.isOk() ? 0 : 1;
 }
