@@ -16,13 +16,14 @@ if(MSVC)
 elseif(MINGW)
     include(CheckCXXSourceCompiles)
     set(CMAKE_REQUIRED_FLAGS "-fstack-protector-strong")
+    set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--undefined=__stack_chk_fail")
     check_cxx_source_compiles(
-        "extern \"C\" void __stack_chk_fail(void);
-         int main() { return (&__stack_chk_fail == nullptr) ? 1 : 0; }"
-        MCSM_MINGW_HAS_STACK_PROTECTOR_RUNTIME)
+        "int main() { return 0; }"
+        MCSM_MINGW_STACK_PROTECTOR_LINKS)
     unset(CMAKE_REQUIRED_FLAGS)
+    unset(CMAKE_REQUIRED_LINK_OPTIONS)
     add_compile_options(-D_FORTIFY_SOURCE=2)
-    if(MCSM_MINGW_HAS_STACK_PROTECTOR_RUNTIME)
+    if(MCSM_MINGW_STACK_PROTECTOR_LINKS)
         add_compile_options(-fstack-protector-strong)
     endif()
     add_link_options(-Wl,--dynamicbase -Wl,--nxcompat -Wl,--high-entropy-va)
