@@ -15,13 +15,14 @@ if(MSVC)
     add_link_options(/guard:cf)
 elseif(MINGW)
     include(CheckCXXSourceCompiles)
-    set(CMAKE_REQUIRED_FLAGS "-O2 -fstack-protector-strong")
+    set(CMAKE_REQUIRED_FLAGS "-fstack-protector-strong")
     check_cxx_source_compiles(
-        "int main() { volatile char buffer[16]; buffer[0] = 1; return buffer[0]; }"
-        MCSM_MINGW_HAS_STACK_PROTECTOR)
+        "extern \"C\" void __stack_chk_fail(void);
+         int main() { return (&__stack_chk_fail == nullptr) ? 1 : 0; }"
+        MCSM_MINGW_HAS_STACK_PROTECTOR_RUNTIME)
     unset(CMAKE_REQUIRED_FLAGS)
     add_compile_options(-D_FORTIFY_SOURCE=2)
-    if(MCSM_MINGW_HAS_STACK_PROTECTOR)
+    if(MCSM_MINGW_HAS_STACK_PROTECTOR_RUNTIME)
         add_compile_options(-fstack-protector-strong)
     endif()
     add_link_options(-Wl,--dynamicbase -Wl,--nxcompat -Wl,--high-entropy-va)
