@@ -185,6 +185,8 @@ mcsm-cli plugin service start --name com.example.ops-console     # 启动插件�
 
 | 文档 | 内容 |
 | --- | --- |
+| [`docs/DEVELOPMENT.zh-CN.md`](docs/DEVELOPMENT.zh-CN.md) | **开发辅助文档**：环境准备、构建、调试、测试、扩展点、代码约定与发布流程 |
+| [`docs/DEVELOPMENT.en.md`](docs/DEVELOPMENT.en.md) | English developer guide covering the same workflow |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 目录结构、模块分工、数据流、设计取舍 |
 | [`docs/CLI.md`](docs/CLI.md) | 后端命令与参数完整参考 |
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | 前后端 JSON 协议、NDJSON 进度与日志流 |
@@ -226,7 +228,7 @@ McServerManager/
 
 ```bash
 python tools/static_check.py       # 源码一致性检查（include / 括号 / 声明实现 / 编码陷阱 / CMake 清单）
-powershell -File tools/smoke-test.ps1   # 后端冒烟测试（85 项，含插件包回归，不需要 Docker）
+powershell -File tools/smoke-test.ps1   # 后端冒烟测试（86 项，含插件包回归，不需要 Docker）
 powershell -File tools/gui-smoke.ps1    # 界面冒烟测试（启动、拖拽、快速切页残留对比、截图）
 powershell -File tools/gui-smoke.ps1 -Page settings-runtime -Resize 1100x700 -Screenshot small.png   # 小窗口布局回归
 python tools/check-endpoints.py    # 检查上游 API（Mojang / Paper / Purpur / Fabric / Modrinth…）可用性
@@ -275,7 +277,12 @@ Gitea 发布脚本需要显式提供 `-BaseUrl` 或环境变量 `GITEA_URL`。�
 
 ## 参与开发
 
-欢迎提交 Issue 与 PR。改动前建议先跑一遍：
+欢迎提交 Issue 与 PR。完整的环境准备、代码导航、扩展流程、测试矩阵和发布步骤见：
+
+- [开发辅助文档（简体中文）](docs/DEVELOPMENT.zh-CN.md)
+- [Developer guide (English)](docs/DEVELOPMENT.en.md)
+
+改动前至少运行：
 
 ```bash
 python tools/static_check.py && powershell -File tools/smoke-test.ps1

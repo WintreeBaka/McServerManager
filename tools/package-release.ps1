@@ -7,7 +7,7 @@
 #     .\tools\package-release.ps1
 #     .\tools\package-release.ps1 -Flavor with-plugins             # 追加示例插件包
 #     .\tools\package-release.ps1 -Flavor with-container-porter    # 附带官方插件「容器搬运工」
-#     .\tools\package-release.ps1 -Version 1.2.3 -DistDir dist
+#     .\tools\package-release.ps1 -Version 1.2.4 -DistDir dist
 #
 # Flavours deliberately get different folder names:
 #     McServerManager-<版本>-win64                        含 GUI 的便携版

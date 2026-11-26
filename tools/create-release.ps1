@@ -7,11 +7,11 @@
         $env:GITHUB_TOKEN = "ghp_xxx"
         .\tools\create-release.ps1
 
-    默认行为（1.2.3）：
-        tag     : v1.2.3
-        说明    : docs\RELEASE_NOTES-1.2.3.md
-        附件    : dist\McServerManager-1.2.3-win64.zip         （GUI 便携版）
-                  dist\McServerManager-1.2.3-win64-cli.zip     （纯 CLI 精简版）
+    默认行为（版本从 CMakeLists.txt 读取）：
+        tag     : v<Version>
+        说明    : docs\RELEASE_NOTES-<Version>.md
+        附件    : dist\McServerManager-<Version>-win64.zip       （GUI 便携版）
+                  dist\McServerManager-<Version>-win64-cli.zip   （纯 CLI 精简版）
                   docs\PLUGIN-SDK.md                           （接口文档）
                   dist\plugins\com.mcsm.player-admin-1.1.0.zip （官方玩家管理插件）
 
