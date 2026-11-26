@@ -26,6 +26,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Add-Type -AssemblyName System.Net.Http
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "script-common.ps1")
 if (-not $Version) { $Version = Get-ProjectVersion -ProjectRoot $projectRoot }
