@@ -14,16 +14,11 @@ if(MSVC)
     add_compile_options(/utf-8 /permissive- /W4 /guard:cf)
     add_link_options(/guard:cf)
 elseif(MINGW)
-    include(CheckCXXSourceCompiles)
-    set(CMAKE_REQUIRED_FLAGS "-fstack-protector-strong")
-    set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--undefined=__stack_chk_fail")
-    check_cxx_source_compiles(
-        "int main() { return 0; }"
-        MCSM_MINGW_STACK_PROTECTOR_LINKS)
-    unset(CMAKE_REQUIRED_FLAGS)
-    unset(CMAKE_REQUIRED_LINK_OPTIONS)
     add_compile_options(-D_FORTIFY_SOURCE=2)
-    if(MCSM_MINGW_STACK_PROTECTOR_LINKS)
+    # The Qt 6.6 MinGW 11.2 toolchain emits stack canaries but does not ship
+    # the __stack_chk_* runtime symbols. GCC 12+ includes them.
+    if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+            AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 12))
         add_compile_options(-fstack-protector-strong)
     endif()
     add_link_options(-Wl,--dynamicbase -Wl,--nxcompat -Wl,--high-entropy-va)
