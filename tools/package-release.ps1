@@ -113,11 +113,11 @@ foreach ($notice in @("SHA256SUMS.txt", "readme.txt", "history.txt")) {
 # tester can load them from 设置 → 插件扩展 → 添加插件 (they are NOT pre-installed;
 # the app data directory is %LOCALAPPDATA%\McServerManager).
 if ($Flavor -eq "with-plugins") {
-    $pluginDir = Join-Path $DistDir "plugins"
-    if (-not (Get-ChildItem $pluginDir -Filter *.zip -ErrorAction SilentlyContinue)) {
-        Write-Host "no packaged plugins found - running examples\plugins\build-examples.ps1" -ForegroundColor Yellow
-        & (Join-Path $PSScriptRoot "..\examples\plugins\build-examples.ps1") | Out-Null
-    }
+    # Distinguish API v2 examples from official packages, which may also be
+    # present in dist\plugins. Rebuild examples on every packaging pass so a
+    # stale official-package directory cannot be shipped under the wrong label.
+    $pluginDir = Join-Path $DistDir "example-plugins"
+    & (Join-Path $PSScriptRoot "..\examples\plugins\build-examples.ps1") -OutDir $pluginDir | Out-Null
     $target = Join-Path $stage "plugin-packages"
     New-Item -ItemType Directory -Force -Path $target | Out-Null
     Copy-Item (Join-Path $pluginDir "*.zip") -Destination $target -Force
