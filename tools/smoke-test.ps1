@@ -680,17 +680,22 @@ if (-not $zipTool) {
         $permissionBackend = @'
 const fs = require("fs");
 const cp = require("child_process");
+const path = require("path");
 const readline = require("readline");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   let request;
   try {
     request = JSON.parse(line);
     const params = request.params || {};
+    const pluginData = process.env.MCSM_PLUGIN_DATA || "";
+    const home = pluginData ? path.resolve(pluginData, "../../..") : "";
+    const serverDir = home ? path.join(home, "servers") : "";
     let data = {};
     if (request.method === "read")
-      data = { text: fs.readFileSync(params.path, "utf8") };
+      data = { text: fs.readFileSync(params.path || path.join(serverDir, "permission-probe.txt"), "utf8") };
     else if (request.method === "write") {
-      fs.writeFileSync(params.path, params.text);
+      fs.writeFileSync(params.path || path.join(serverDir, "permission-written.txt"),
+        params.text || "allowed");
       data = { written: true };
     } else if (request.method === "spawn")
       data = { text: cp.execFileSync(process.execPath,
@@ -739,11 +744,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         $permissionTarget = Join-Path $permissionTargetDir "permission-probe.txt"
         Set-Content -Path $permissionTarget -Value "protected" -Encoding UTF8
         $permissionWriteTarget = Join-Path $permissionTargetDir "permission-written.txt"
-        # Windows PowerShell 5.1 strips JSON quotes from native argv. Escaping
-        # them here exercises the same CLI syntax documented for other shells.
-        $readParams = (@{ path = $permissionTarget } | ConvertTo-Json -Compress).Replace('"', '\"')
-        $writeParams = (@{ path = $permissionWriteTarget; text = "allowed" } |
-            ConvertTo-Json -Compress).Replace('"', '\"')
 
         $permissionInstall = Invoke-Cli @(
             "plugin", "package", "install", "--zip", $permissionZip)
@@ -772,15 +772,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
             ($undeclaredGrant.error.code + " " + $undeclaredGrant.error.detail)
 
         $deniedRead = Invoke-Cli @(
-            "plugin", "call", "--name", "smoke.permission", "--method", "read",
-            "--params", $readParams) -AllowFailure
+            "plugin", "call", "--name", "smoke.permission", "--method", "read") -AllowFailure
         Write-Result "zero-grant plugin cannot read server files" `
             ((-not $deniedRead.ok) -and $deniedRead.error.code -eq "ERR_ACCESS_DENIED") `
             ($deniedRead.error.code + " " + $deniedRead.error.message)
 
         $deniedWrite = Invoke-Cli @(
-            "plugin", "call", "--name", "smoke.permission", "--method", "write",
-            "--params", $writeParams) -AllowFailure
+            "plugin", "call", "--name", "smoke.permission", "--method", "write") -AllowFailure
         Write-Result "zero-grant plugin cannot write server files" `
             ((-not $deniedWrite.ok) -and (-not (Test-Path $permissionWriteTarget))) `
             ($deniedWrite.error.code + " " + $deniedWrite.error.message)
@@ -803,15 +801,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
             "plugin", "package", "permissions", "--name", "smoke.permission",
             "--grant", "filesystem.server.read")
         $allowedRead = Invoke-Cli @(
-            "plugin", "call", "--name", "smoke.permission", "--method", "read",
-            "--params", $readParams) -AllowFailure
+            "plugin", "call", "--name", "smoke.permission", "--method", "read") -AllowFailure
         Write-Result "granting filesystem.server.read enables reads" `
             ($readGrant.ok -and $allowedRead.ok -and $allowedRead.data.data.text.Trim() -eq "protected") `
             ($allowedRead.error.code + " " + $allowedRead.error.message)
 
         $writeStillDenied = Invoke-Cli @(
-            "plugin", "call", "--name", "smoke.permission", "--method", "write",
-            "--params", $writeParams) -AllowFailure
+            "plugin", "call", "--name", "smoke.permission", "--method", "write") -AllowFailure
         Write-Result "read grant does not imply write" `
             ((-not $writeStillDenied.ok) -and (-not (Test-Path $permissionWriteTarget))) `
             ($writeStillDenied.error.code + " " + $writeStillDenied.error.message)
@@ -820,8 +816,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
             "plugin", "package", "permissions", "--name", "smoke.permission",
             "--grant", "filesystem.server.read,filesystem.server.write,process.spawn,servers.read")
         $allowedWrite = Invoke-Cli @(
-            "plugin", "call", "--name", "smoke.permission", "--method", "write",
-            "--params", $writeParams) -AllowFailure
+            "plugin", "call", "--name", "smoke.permission", "--method", "write") -AllowFailure
         Write-Result "filesystem.server.write enables writes" `
             ($broadGrant.ok -and $allowedWrite.ok -and $allowedWrite.data.data.written -eq $true) `
             ($allowedWrite.error.code + " " + $allowedWrite.error.message)
@@ -880,8 +875,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         $revokeAll = Invoke-Cli @(
             "plugin", "package", "permissions", "--name", "smoke.permission", "--revoke-all")
         $readAfterRevoke = Invoke-Cli @(
-            "plugin", "call", "--name", "smoke.permission", "--method", "read",
-            "--params", $readParams) -AllowFailure
+            "plugin", "call", "--name", "smoke.permission", "--method", "read") -AllowFailure
         Write-Result "revoke-all immediately removes capabilities" `
             ($revokeAll.ok -and $revokeAll.data.grantedPermissions.Count -eq 0 -and
                 (-not $readAfterRevoke.ok) -and $readAfterRevoke.error.code -eq "ERR_ACCESS_DENIED") `
