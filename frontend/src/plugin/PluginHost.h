@@ -139,6 +139,10 @@ public:
     void reportLog(const QString &pluginId, const QString &message);
     void invokeBackend(const QString &pluginId, const QStringList &arguments,
                        const QJSValue &callback, QJSEngine *engine = nullptr);
+    bool pluginHasPermission(const QString &pluginId, const QString &permission) const;
+    void denyBackend(const QString &pluginId, const QString &permission,
+                     const QString &detail, const QJSValue &callback,
+                     QJSEngine *engine);
     QVariant storageValue(const QString &pluginId, const QString &key) const;
     void setStorageValue(const QString &pluginId, const QString &key, const QVariant &value);
     void removeStorageValue(const QString &pluginId, const QString &key);
@@ -169,6 +173,7 @@ signals:
     void loadFinished();
 
 private:
+    QJsonObject packageForPlugin(const QString &pluginId) const;
     void loadFrontendPlugins();
     void teardown();
     /// Evaluates `source` with a hard time budget. Returns false and fills

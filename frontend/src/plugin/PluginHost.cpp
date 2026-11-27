@@ -132,6 +132,49 @@ QStringList argumentsFrom(const QJSValue &command)
     return QStringList();
 }
 
+QString commandPermission(const QStringList &arguments, const QString &pluginId)
+{
+    if (arguments.size() >= 2 && arguments.at(0) == QLatin1String("plugin")
+        && arguments.at(1) == QLatin1String("call")) {
+        const int nameIndex = arguments.indexOf(QStringLiteral("--name"));
+        if (nameIndex >= 0 && nameIndex + 1 < arguments.size()
+            && arguments.at(nameIndex + 1) == pluginId)
+            return QString(); // invoking itself is always allowed
+        return QStringLiteral("plugin.call.other");
+    }
+
+    QStringList words;
+    for (const QString &argument : arguments) {
+        if (argument.startsWith(QLatin1Char('-')))
+            break;
+        words << argument.toLower();
+        if (words.size() == 2)
+            break;
+    }
+    const QString prefix = words.join(QLatin1Char(' '));
+    if (prefix == QLatin1String("server list") || prefix == QLatin1String("server get")
+        || prefix == QLatin1String("server status") || prefix == QLatin1String("server logs")
+        || prefix == QLatin1String("config schema") || prefix == QLatin1String("config read")
+        || prefix == QLatin1String("config raw") || prefix == QLatin1String("config validate")
+        || prefix == QLatin1String("backup list"))
+        return QStringLiteral("servers.read");
+    if (prefix == QLatin1String("server start") || prefix == QLatin1String("server stop")
+        || prefix == QLatin1String("server restart") || prefix == QLatin1String("server kill"))
+        return QStringLiteral("servers.control");
+    if (prefix == QLatin1String("server command"))
+        return QStringLiteral("console.send");
+    if (prefix == QLatin1String("server delete"))
+        return QStringLiteral("server.delete");
+    if (prefix == QLatin1String("config apply") || prefix == QLatin1String("config rollback"))
+        return QStringLiteral("config.write");
+    if (prefix == QLatin1String("backup create") || prefix == QLatin1String("backup restore")
+        || prefix == QLatin1String("backup remove") || prefix == QLatin1String("backup schedule"))
+        return QStringLiteral("backup.manage");
+    if (prefix == QLatin1String("settings get"))
+        return QStringLiteral("settings.read");
+    return QStringLiteral("unsupported.command");
+}
+
 } // namespace
 
 // -------------------------------------------------------------- PluginApi ----
@@ -161,6 +204,10 @@ void PluginApi::toast(const QString &message, const QString &level) const
 
 QString PluginApi::registerPage(const QJSValue &descriptor)
 {
+    if (!m_host->pluginHasPermission(pluginId(), QStringLiteral("ui.pages"))) {
+        m_host->reportLog(pluginId(), QStringLiteral("权限不足：ui.pages，页面未注册"));
+        return QString();
+    }
     QJsonObject object = QJsonObject::fromVariantMap(descriptor.toVariant().toMap());
     if (!descriptor.isObject() || object.isEmpty()) {
         log(QStringLiteral("registerPage 需要传入 {id,title,icon,subtitle} 对象"));
@@ -175,12 +222,18 @@ QString PluginApi::registerPage(const QJSValue &descriptor)
 
 void PluginApi::setPageContent(const QString &pageId, const QJSValue &blocks) const
 {
+    if (!m_host->pluginHasPermission(pluginId(), QStringLiteral("ui.pages"))) {
+        m_host->reportLog(pluginId(), QStringLiteral("权限不足：ui.pages，页面内容未更新"));
+        return;
+    }
     QJsonArray array = QJsonArray::fromVariantList(blocks.toVariant().toList());
     m_host->setPageContent(pageId, array);
 }
 
 void PluginApi::openPage(const QString &pageId) const
 {
+    if (!m_host->pluginHasPermission(pluginId(), QStringLiteral("ui.pages")))
+        return;
     m_host->requestPageOpen(pageId);
 }
 
@@ -230,6 +283,13 @@ QJSValue PluginApi::storageKeys() const
 
 QJSValue PluginApi::settingsGet(const QString &key) const
 {
+    const QString ownPrefix = QStringLiteral("pluginData/%1/").arg(pluginId());
+    if (!key.startsWith(ownPrefix)
+        && !m_host->pluginHasPermission(pluginId(), QStringLiteral("settings.read"))) {
+        m_host->reportLog(pluginId(),
+                          QStringLiteral("权限不足：settings.read，拒绝读取设置 %1").arg(key));
+        return m_engine->toScriptValue(QVariant());
+    }
     return m_engine->toScriptValue(m_host->settingsValue(key));
 }
 
@@ -243,11 +303,17 @@ void PluginApi::settingsSet(const QString &key, const QJSValue &value) const
 
 QJSValue PluginApi::serversList() const
 {
+    if (!m_host->pluginHasPermission(pluginId(), QStringLiteral("servers.read"))) {
+        m_host->reportLog(pluginId(), QStringLiteral("权限不足：servers.read"));
+        return m_engine->toScriptValue(QVariantList());
+    }
     return m_engine->toScriptValue(m_host->serverListJson().toVariantList());
 }
 
 QString PluginApi::selectedServer() const
 {
+    if (!m_host->pluginHasPermission(pluginId(), QStringLiteral("servers.read")))
+        return QString();
     return m_host->selectedServerId();
 }
 
@@ -327,7 +393,7 @@ QString PluginApi::managerVersion() const
 
 QString PluginApi::apiVersion() const
 {
-    return QStringLiteral("1");
+    return QStringLiteral("2");
 }
 
 void PluginApi::dispatch(const QString &event, const QJsonObject &payload)
@@ -401,8 +467,22 @@ void PluginHost::loadFrontendPlugins()
         const QJsonObject plugin = value.toObject();
         if (!plugin.value(QStringLiteral("enabled")).toBool(true))
             continue;
+        if (!plugin.value(QStringLiteral("runtimeEligible")).toBool(true)) {
+            m_errors << QStringLiteral("%1：API 不兼容，已阻止加载")
+                            .arg(plugin.value(QStringLiteral("id")).toString());
+            continue;
+        }
         if (!plugin.value(QStringLiteral("hasFrontend")).toBool())
             continue;
+        const QJsonArray grants = plugin.value(QStringLiteral("grantedPermissions")).toArray();
+        bool canUseUi = false;
+        for (const QJsonValue &grant : grants)
+            canUseUi = canUseUi || grant.toString() == QLatin1String("ui.pages");
+        if (!canUseUi) {
+            m_errors << QStringLiteral("%1：未授予 ui.pages，页面未加载")
+                            .arg(plugin.value(QStringLiteral("id")).toString());
+            continue;
+        }
 
         const QString pluginId = plugin.value(QStringLiteral("id")).toString();
         const QString entry = plugin.value(QStringLiteral("frontendEntry")).toString();
@@ -440,7 +520,7 @@ void PluginHost::loadFrontendPlugins()
                                                         {QStringLiteral("path"), plugin.value(QStringLiteral("path")).toString()},
                                                     }));
         mcsm.setProperty(QStringLiteral("version"), QCoreApplication::applicationVersion());
-        mcsm.setProperty(QStringLiteral("apiVersion"), QStringLiteral("1"));
+        mcsm.setProperty(QStringLiteral("apiVersion"), QStringLiteral("2"));
         mcsm.setProperty(QStringLiteral("log"), wrapped.property(QStringLiteral("log")));
         mcsm.setProperty(QStringLiteral("toast"), wrapped.property(QStringLiteral("toast")));
         mcsm.setProperty(QStringLiteral("openUrl"), wrapped.property(QStringLiteral("openUrl")));
@@ -623,11 +703,59 @@ void PluginHost::reportLog(const QString &pluginId, const QString &message)
     emit pluginMessage(pluginId, message);
 }
 
+QJsonObject PluginHost::packageForPlugin(const QString &pluginId) const
+{
+    for (const QJsonValue &value : m_packages) {
+        const QJsonObject plugin = value.toObject();
+        if (plugin.value(QStringLiteral("id")).toString() == pluginId)
+            return plugin;
+    }
+    return QJsonObject();
+}
+
+bool PluginHost::pluginHasPermission(const QString &pluginId, const QString &permission) const
+{
+    const QJsonObject plugin = packageForPlugin(pluginId);
+    if (plugin.isEmpty() || !plugin.value(QStringLiteral("runtimeEligible")).toBool(true))
+        return false;
+    for (const QJsonValue &grant : plugin.value(QStringLiteral("grantedPermissions")).toArray()) {
+        if (grant.toString() == permission)
+            return true;
+    }
+    return false;
+}
+
+void PluginHost::denyBackend(const QString &pluginId, const QString &permission,
+                             const QString &detail, const QJSValue &callback,
+                             QJSEngine *engine)
+{
+    const QString message = QStringLiteral("插件 %1 权限不足：%2").arg(pluginId, permission);
+    reportLog(pluginId, QStringLiteral("%1；%2").arg(message, detail));
+    pushToast(message, QStringLiteral("warning"));
+    if (engine && callback.isCallable())
+        dispatchOne(pluginId, engine, callback, engine->toScriptValue(QVariantMap {
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("data"), QVariantMap()},
+            {QStringLiteral("warnings"), QStringList()},
+            {QStringLiteral("error"), detail},
+            {QStringLiteral("code"), QStringLiteral("PERMISSION_DENIED")},
+        }));
+}
+
 void PluginHost::invokeBackend(const QString &pluginId, const QStringList &arguments,
                                const QJSValue &callback, QJSEngine *engine)
 {
     if (!m_backend || arguments.isEmpty())
         return;
+    const QString permission = commandPermission(arguments, pluginId);
+    if (!permission.isEmpty() && !pluginHasPermission(pluginId, permission)) {
+        denyBackend(pluginId, permission,
+                    QStringLiteral("该操作需要 %1；请到“插件管理”中授权。"
+                                   "关闭权限可能导致对应功能不可用。")
+                        .arg(permission),
+                    callback, engine);
+        return;
+    }
     const quint64 generation = m_generation;
     QPointer<QJSEngine> engineGuard(engine);
     m_backend->request(arguments, this,
@@ -637,6 +765,12 @@ void PluginHost::invokeBackend(const QString &pluginId, const QStringList &argum
         if (generation != m_generation || !engineGuard)
             return;
         QJSEngine *liveEngine = engineGuard.data();
+        if (!reply.ok && reply.code == QLatin1String("PERMISSION_DENIED")) {
+            const QString detail = reply.detail.isEmpty() ? reply.errorText() : reply.detail;
+            reportLog(pluginId, QStringLiteral("权限拒绝：%1").arg(detail));
+            pushToast(QStringLiteral("插件 %1 的权限操作被拒绝").arg(pluginId),
+                      QStringLiteral("warning"));
+        }
         if (!callback.isCallable())
             return;
         QJSValue argument = liveEngine->newObject();

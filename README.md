@@ -56,10 +56,14 @@
 管理器本身也可以被插件扩展，插件包支持 **本地 zip** 或 **URL** 导入，
 导入时自动识别作用域（前端 / 后端 / Web / 全局）：
 
+> **1.3.0 破坏性升级：**管理器插件接口升级到 API 2。API 1 插件不会被加载或执行；新插件必须
+> 显式声明 `apiVersion: 2`，安装时默认零权限，用户可在安装页和「插件管理」中逐项授权、撤销。
+> 关闭权限后相关功能可能异常，错误会进入通知和日志。当前官方 API 1 插件需要后续迁移。
+
 | 类型 | 能力 |
 | --- | --- |
-| 前端扩展 | 用 `mcsm.*` API 注册页面（表格 / 按钮 / 日志 / 富文本…），订阅事件，调用任意后端命令 |
-| 后端服务 | JSON-Line 钩子与自定义 RPC；`server.beforeStart` 可返回 JVM / 容器参数补丁 |
+| 前端扩展 | 用 `mcsm.*` API 注册页面（表格 / 按钮 / 日志 / 富文本…），按授权调用自己的后端与服务器命令 |
+| 后端服务 | Node.js JSON-Line 钩子与自定义 RPC；读取服务器、启动补丁和子进程能力均需授权 |
 | 支持库 / Web 面板 | 自带本地 HTTP 服务，管理器负责启动、停止并一键打开浏览器面板 |
 | 全局 | 同时含 `frontend/` 与 `backend/`，共享同一个 `plugin.json` |
 
@@ -68,7 +72,8 @@
 
 首批官方插件：[`plugins/official/player-admin`](plugins/official/player-admin/) —— 玩家管理页面，
 管理白名单 / 封禁 / OP 名单，并对在线或已知玩家执行踢出、标题、私信、游戏模式等操作
-（源码在仓库内，`plugins/build-plugins.ps1` 可直接打包）。
+（源码在仓库内，`plugins/build-plugins.ps1` 可直接打包）。**当前官方插件仍为 API 1，1.3.0
+会显示为不兼容并阻止执行；迁移完成前请保留数据而不要依赖其功能。**
 
 **界面**
 
@@ -228,7 +233,7 @@ McServerManager/
 
 ```bash
 python tools/static_check.py       # 源码一致性检查（include / 括号 / 声明实现 / 编码陷阱 / CMake 清单）
-powershell -File tools/smoke-test.ps1   # 后端冒烟测试（86 项，含插件包回归，不需要 Docker）
+powershell -File tools/smoke-test.ps1   # 后端冒烟测试（101 项，含插件权限矩阵，不需要 Docker）
 powershell -File tools/gui-smoke.ps1    # 界面冒烟测试（启动、拖拽、快速切页残留对比、截图）
 powershell -File tools/gui-smoke.ps1 -Page settings-runtime -Resize 1100x700 -Screenshot small.png   # 小窗口布局回归
 python tools/check-endpoints.py    # 检查上游 API（Mojang / Paper / Purpur / Fabric / Modrinth…）可用性
@@ -298,7 +303,7 @@ python tools/static_check.py && powershell -File tools/smoke-test.ps1
 
 ```bash
 python tools/static_check.py                  # 源码一致性检查
-powershell -File tools/smoke-test.ps1         # 后端冒烟测试（67 项，含插件安全用例）
+powershell -File tools/smoke-test.ps1         # 后端冒烟测试（101 项，含插件权限矩阵）
 powershell -File tools/gui-smoke.ps1          # 界面冒烟测试（拖拽 / 快速切页 / 截图）
 powershell -File tools/ui-perf.ps1            # 界面 CPU 测量（空闲 / 快速切页）
 ```

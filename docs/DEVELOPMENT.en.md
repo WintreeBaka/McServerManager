@@ -42,7 +42,7 @@ official installer. macOS can use an official Qt kit.
 ### Optional, depending on the task
 
 - Docker Desktop for container lifecycle, log, backup, and image integration tests
-- Node.js for official plugin backend code and `node --check`
+- Node.js 24 for API 2 plugin backends, Permission Model tests, and `node --check`
 - Python 3 for static checks, upstream API probes, and RCON diagnostics
 - PowerShell 7 or Windows PowerShell 5.1 for Windows builds, smoke tests, and releases
 
@@ -211,7 +211,7 @@ Install and invoke each affected plugin at least once:
 
 ```powershell
 .\build\bin\mcsm-cli.exe --home $devHome plugin package inspect --zip .\dist\plugins\<plugin>.zip
-.\build\bin\mcsm-cli.exe --home $devHome plugin package install --zip .\dist\plugins\<plugin>.zip
+.\build\bin\mcsm-cli.exe --home $devHome plugin package install --zip .\dist\plugins\<plugin>.zip --grant ui.pages,servers.read
 .\build\bin\mcsm-cli.exe --home $devHome plugin call --name <plugin-id> --method <method>
 ```
 
@@ -276,9 +276,17 @@ Important constraints:
 
 - Packages must remain inside the manager data directory; reject absolute paths, `..`,
   escaping symlinks, and hard links.
+- Starting with 1.3.0, packages must declare `apiVersion: 2`. API 1 packages remain visible
+  for removal or upgrade but are never executed. Backends are Node.js-only and install with
+  zero grants; pass explicit `--grant` values in tests instead of hiding missing boundaries
+  with `--grant-all`.
+- `permissions` is a declared contract. The UI cannot grant an undeclared capability, and new
+  permissions default to unchecked during upgrades. A revoked capability must produce
+  `PERMISSION_DENIED`, with the failure explained through notifications and logs.
 - Frontend plugins run in `QJSEngine` with no native file or process access.
-- Backend plugins are separate processes using one JSON request line and one JSON response
-  line. Request lines have a size limit.
+- Backend plugins are separate Node.js processes using one JSON request line and one JSON
+  response line. Request lines have a size limit. They can access their own data by default;
+  server directories and child processes require explicit grants.
 - Plugins must not write `servers.json` directly. Use controlled registration:
   `mcsm-cli server register --file <record.json>`.
 - Plugin access is restricted to its own data directory. Server paths must resolve inside
@@ -287,6 +295,11 @@ Important constraints:
   player files behind the running server.
 - Keep the SDK, examples, compatibility notes, and plugin smoke tests synchronized with
   any API change.
+
+Permission tests must cover zero-grant install, selective grant and revocation, new sensitive
+permissions defaulting off on upgrade, rejection of unknown/undeclared grants, blocking API 1,
+denied server-directory and `child_process` access, and matching notification/log output.
+See section 8 of `docs/PLUGIN-SDK.md`.
 
 ### 7.5 Change process or container lifecycle
 

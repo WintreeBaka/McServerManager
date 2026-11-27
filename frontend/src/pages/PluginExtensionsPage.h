@@ -33,6 +33,7 @@ private:
     void openFolder(const QString &path);
     void openPluginPage(const QString &pluginId);
     void openPanel(const QJsonObject &plugin);
+    void managePermissions(const QJsonObject &plugin);
     void openDocs();
     void setStatus(const QString &text);
 

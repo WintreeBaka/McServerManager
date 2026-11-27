@@ -23,6 +23,7 @@ set(MCSM_BACKEND_SOURCES
     src/backup/BackupService.cpp
     src/plugin/PluginManager.cpp
     src/plugin/PackageManager.cpp
+    src/plugin/PluginPermissions.cpp
     src/plugin/PluginRuntime.cpp
     src/schedule/Scheduler.cpp
 )
@@ -51,6 +52,7 @@ set(MCSM_BACKEND_HEADERS
     src/backup/BackupService.h
     src/plugin/PluginManager.h
     src/plugin/PackageManager.h
+    src/plugin/PluginPermissions.h
     src/plugin/PluginRuntime.h
     src/schedule/Scheduler.h
 )

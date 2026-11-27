@@ -15,6 +15,7 @@
 #include "core/Logger.h"
 #include "core/StringUtil.h"
 #include "net/HttpClient.h"
+#include "plugin/PluginPermissions.h"
 
 namespace mcsm {
 namespace {
@@ -22,8 +23,8 @@ namespace {
 /// Plugin API level. Bump kPluginApiVersion whenever a new batch of interfaces
 /// is added; raise kPluginApiMinVersion only for breaking changes - that is how
 /// old plugins are retired instead of failing in surprising ways.
-constexpr int kPluginApiVersion = 1;
-constexpr int kPluginApiMinVersion = 1;
+constexpr int kPluginApiVersion = 2;
+constexpr int kPluginApiMinVersion = 2;
 
 QString nowIso()
 {
@@ -143,6 +144,10 @@ QJsonObject PluginManifest::toJson() const
     object.insert(QStringLiteral("scopeToken"), scopeToken);
     object.insert(QStringLiteral("parts"), QJsonArray::fromStringList(parts));
     object.insert(QStringLiteral("permissions"), QJsonArray::fromStringList(permissions));
+    object.insert(QStringLiteral("grantedPermissions"),
+                  QJsonArray::fromStringList(grantedPermissions));
+    object.insert(QStringLiteral("permissionDetails"),
+                  PluginPermissions::details(permissions, grantedPermissions));
     object.insert(QStringLiteral("hooks"), QJsonArray::fromStringList(hooks));
     object.insert(QStringLiteral("hasFrontend"), hasFrontend());
     object.insert(QStringLiteral("hasBackend"), hasBackend());
@@ -160,6 +165,8 @@ QJsonObject PluginManifest::toJson() const
     object.insert(QStringLiteral("installedAt"), installedAt);
     object.insert(QStringLiteral("source"), source);
     object.insert(QStringLiteral("sourceUrl"), sourceUrl);
+    object.insert(QStringLiteral("validationErrors"), QJsonArray::fromStringList(validationErrors));
+    object.insert(QStringLiteral("runtimeEligible"), runtimeEligible && apiSupported);
     object.insert(QStringLiteral("manifest"), raw);
     return object;
 }
@@ -184,7 +191,7 @@ int PackageManager::supportedMaxApi()
 QString PackageManager::managerVersion()
 {
     const QString version = QCoreApplication::applicationVersion();
-    return version.isEmpty() ? QStringLiteral("1.2.3") : version;
+    return version.isEmpty() ? QStringLiteral("1.3.0") : version;
 }
 
 bool PackageManager::isSafePluginPath(const QString &relative)
@@ -261,9 +268,11 @@ PluginValidation PackageManager::inspectDirectory(const QString &directory, QStr
     PluginValidation validation;
     const QString root = locatePluginRoot(directory);
     const QString manifestPath = QDir(root).filePath(QStringLiteral("plugin.json"));
+    PluginManifest manifest;
     const auto finish = [&](const QString &message) {
         validation.ok = false;
         validation.errors << message;
+        validation.manifest = manifest;
         if (error)
             *error = message;
         return validation;
@@ -280,7 +289,6 @@ PluginValidation PackageManager::inspectDirectory(const QString &directory, QStr
     if (!parsed)
         return finish(QStringLiteral("plugin.json 不是合法的 JSON"));
 
-    PluginManifest manifest;
     manifest.raw = raw;
     manifest.path = root;
     manifest.source = QStringLiteral("zip");
@@ -305,7 +313,9 @@ PluginValidation PackageManager::inspectDirectory(const QString &directory, QStr
     // ---- apiVersion: a plain integer inside [SUPPORTED_MIN_API, SUPPORTED_MAX_API]
     const QJsonValue apiValue = raw.value(QStringLiteral("apiVersion"));
     if (apiValue.isUndefined() || apiValue.isNull()) {
-        manifest.apiVersion = supportedMaxApi();
+        // API v2 is a breaking contract. A missing field cannot silently opt an
+        // old package into the new permission model.
+        manifest.apiVersion = 1;
     } else if (apiValue.isDouble()) {
         manifest.apiVersion = apiValue.toInt();
     } else if (apiValue.isString()) {
@@ -327,6 +337,13 @@ PluginValidation PackageManager::inspectDirectory(const QString &directory, QStr
                           .arg(supportedMaxApi()));
     }
 
+    QStringList normalizedPermissions;
+    QString permissionError;
+    if (!PluginPermissions::normalize(manifest.permissions, &normalizedPermissions,
+                                      &permissionError, &validation.warnings)) {
+        return finish(permissionError);
+    }
+    manifest.permissions = normalizedPermissions;
     // minManagerVersion is informational only: it tells the user which manager a
     // plugin was written for, but it never blocks loading.
     if (!manifest.minManagerVersion.isEmpty()) {
@@ -483,6 +500,7 @@ QJsonObject PackageManager::readRegistry()
                 {QStringLiteral("path"), child.absoluteFilePath()},
                 {QStringLiteral("installedAt"), nowIso()},
                 {QStringLiteral("source"), QStringLiteral("recovered")},
+                {QStringLiteral("grantedPermissions"), QJsonArray()},
             });
         }
         registry = QJsonObject {{QStringLiteral("plugins"), rebuilt},
@@ -523,18 +541,30 @@ QVector<PluginManifest> PackageManager::installed(bool includeDisabled)
         const QString path = QDir::cleanPath(
             entry.value(QStringLiteral("path")).toString(QDir(AppPaths::pluginDir(id)).absolutePath()));
         PluginValidation validation = inspectDirectory(path, nullptr);
-        if (!validation.ok) {
+        if (validation.manifest.id.isEmpty()) {
             Logger::warn(QStringLiteral("plugin"),
-                         QStringLiteral("ignoring broken plugin %1: %2")
+                         QStringLiteral("ignoring unreadable plugin %1: %2")
                              .arg(id, validation.errors.join(QStringLiteral("; "))));
             continue;
         }
         PluginManifest manifest = validation.manifest;
         manifest.path = path;
+        manifest.validationErrors = validation.errors;
+        manifest.runtimeEligible = validation.ok;
         manifest.enabled = entry.value(QStringLiteral("enabled")).toBool(true);
         manifest.installedAt = entry.value(QStringLiteral("installedAt")).toString();
         manifest.source = entry.value(QStringLiteral("source")).toString(QStringLiteral("zip"));
         manifest.sourceUrl = entry.value(QStringLiteral("sourceUrl")).toString();
+        QStringList requestedGrants;
+        for (const QJsonValue &grant : entry.value(QStringLiteral("grantedPermissions")).toArray())
+            requestedGrants << grant.toString();
+        QString grantError;
+        QStringList normalizedGrants;
+        PluginPermissions::normalize(requestedGrants, &normalizedGrants, &grantError);
+        for (const QString &grant : normalizedGrants) {
+            if (manifest.permissions.contains(grant))
+                manifest.grantedPermissions << grant;
+        }
         if (!includeDisabled && !manifest.enabled)
             continue;
         result.append(manifest);
@@ -560,7 +590,9 @@ QVector<PluginManifest> PackageManager::frontendPlugins()
 {
     QVector<PluginManifest> result;
     for (const PluginManifest &manifest : installed(false)) {
-        if (manifest.hasFrontend())
+        if (manifest.runtimeEligible && manifest.hasFrontend()
+            && PluginPermissions::isGranted(manifest.grantedPermissions,
+                                            QStringLiteral("ui.pages")))
             result.append(manifest);
     }
     return result;
@@ -724,12 +756,43 @@ Result PackageManager::install(const PluginInstallRequest &request)
                                 .arg(target, AppPaths::pluginsDir()));
     }
     const bool replacing = QFileInfo::exists(target);
+    const PluginManifest previous = replacing ? find(manifest.id) : PluginManifest {};
     if (replacing && !request.force) {
         cleanup();
         return Result::fail(QStringLiteral("PLUGIN_EXISTS"),
                             QStringLiteral("插件 %1 已安装").arg(manifest.id),
                             QStringLiteral("如需覆盖请使用 --force"));
     }
+
+    // Resolve consent before touching the installed version. Invalid grants
+    // must leave both the old plugin and the staging area untouched.
+    QStringList grants;
+    if (request.grantAll) {
+        grants = manifest.permissions;
+    } else if (request.grantSpecified) {
+        grants = request.grantedPermissions;
+    } else if (!previous.id.isEmpty()) {
+        for (const QString &grant : previous.grantedPermissions) {
+            if (manifest.permissions.contains(grant))
+                grants << grant;
+        }
+    }
+    QString grantError;
+    QStringList normalizedGrants;
+    if (!PluginPermissions::normalize(grants, &normalizedGrants, &grantError)) {
+        cleanup();
+        return Result::fail(QStringLiteral("INVALID_PERMISSIONS"), grantError);
+    }
+    for (const QString &grant : normalizedGrants) {
+        if (!manifest.permissions.contains(grant)) {
+            cleanup();
+            return Result::fail(
+                QStringLiteral("INVALID_PERMISSIONS"),
+                QStringLiteral("不能授予插件未声明的权限：%1").arg(grant));
+        }
+    }
+    manifest.grantedPermissions = normalizedGrants;
+
     // Transactional install: copy into a staging directory first, then swap it
     // in. A failed copy can no longer destroy the previously installed version.
     const QString installStaging = QDir(AppPaths::pluginsDir())
@@ -792,6 +855,8 @@ Result PackageManager::install(const PluginInstallRequest &request)
         {QStringLiteral("installedAt"), manifest.installedAt},
         {QStringLiteral("source"), manifest.source},
         {QStringLiteral("sourceUrl"), manifest.sourceUrl},
+        {QStringLiteral("grantedPermissions"),
+         QJsonArray::fromStringList(manifest.grantedPermissions)},
     });
     registry.insert(QStringLiteral("plugins"), next);
     QString registryError;
@@ -868,6 +933,12 @@ Result PackageManager::setEnabled(const QString &id, bool enabled)
         return Result::fail(QStringLiteral("INVALID_PLUGIN_PACKAGE"),
                             QStringLiteral("插件类型未知，无法启用"));
     }
+    if (enabled && !manifest.runtimeEligible) {
+        return Result::fail(
+            QStringLiteral("PLUGIN_API_UNSUPPORTED"),
+            QStringLiteral("插件与当前 API 不兼容，不能启用"),
+            manifest.validationErrors.join(QStringLiteral("\n")));
+    }
 
     QJsonObject registry = readRegistry();
     QJsonArray next;
@@ -877,6 +948,8 @@ Result PackageManager::setEnabled(const QString &id, bool enabled)
         QJsonObject entry = value.toObject();
         if (entry.value(QStringLiteral("id")).toString().compare(manifest.id) == 0) {
             entry.insert(QStringLiteral("enabled"), enabled);
+            entry.insert(QStringLiteral("grantedPermissions"),
+                         QJsonArray::fromStringList(manifest.grantedPermissions));
             found = true;
         }
         next.append(entry);
@@ -890,6 +963,8 @@ Result PackageManager::setEnabled(const QString &id, bool enabled)
             {QStringLiteral("enabled"), enabled},
             {QStringLiteral("path"), manifest.path},
             {QStringLiteral("installedAt"), manifest.installedAt},
+            {QStringLiteral("grantedPermissions"),
+             QJsonArray::fromStringList(manifest.grantedPermissions)},
         });
     }
     registry.insert(QStringLiteral("plugins"), next);
@@ -908,6 +983,55 @@ Result PackageManager::setEnabled(const QString &id, bool enabled)
         {QStringLiteral("enabled"), enabled},
         {QStringLiteral("scope"), manifest.scopeName(manifest.scope)},
     });
+}
+
+Result PackageManager::setPermissions(const QString &id, const QStringList &granted)
+{
+    const PluginManifest manifest = find(id);
+    if (manifest.id.isEmpty())
+        return Result::fail(QStringLiteral("NOT_FOUND"),
+                            QStringLiteral("插件 %1 未安装").arg(id));
+
+    QStringList normalized;
+    QString error;
+    if (!PluginPermissions::normalize(granted, &normalized, &error))
+        return Result::fail(QStringLiteral("INVALID_PERMISSIONS"), error);
+    for (const QString &permission : normalized) {
+        if (!manifest.permissions.contains(permission)) {
+            return Result::fail(
+                QStringLiteral("INVALID_PERMISSIONS"),
+                QStringLiteral("不能授予插件未声明的权限：%1").arg(permission));
+        }
+    }
+
+    QJsonObject registry = readRegistry();
+    QJsonArray next;
+    bool found = false;
+    for (const QJsonValue &value : registry.value(QStringLiteral("plugins")).toArray()) {
+        QJsonObject entry = value.toObject();
+        if (entry.value(QStringLiteral("id")).toString().compare(manifest.id) == 0) {
+            entry.insert(QStringLiteral("grantedPermissions"),
+                         QJsonArray::fromStringList(normalized));
+            entry.insert(QStringLiteral("permissionsUpdatedAt"), nowIso());
+            found = true;
+        }
+        next.append(entry);
+    }
+    if (!found)
+        return Result::fail(QStringLiteral("REGISTRY_ERROR"),
+                            QStringLiteral("插件注册表缺少 %1，无法更新权限").arg(manifest.id));
+    registry.insert(QStringLiteral("plugins"), next);
+    QString writeError;
+    if (!writeRegistry(registry, &writeError))
+        return Result::fail(QStringLiteral("IO_ERROR"),
+                            QStringLiteral("保存插件权限失败"), writeError);
+
+    Logger::info(QStringLiteral("plugin"),
+                 QStringLiteral("permissions for %1: %2")
+                     .arg(manifest.id, normalized.join(QLatin1Char(','))));
+    PluginManifest updated = manifest;
+    updated.grantedPermissions = normalized;
+    return Result::ok(updated.toJson());
 }
 
 // -------------------------------------------------------------- api doc ------
@@ -931,10 +1055,14 @@ QJsonObject PackageManager::apiManifest()
     packageSection.insert(QStringLiteral("supportedApiRange"),
                           QStringLiteral("%1-%2").arg(supportedMinApi()).arg(supportedMaxApi()));
     packageSection.insert(QStringLiteral("example"), QJsonObject {
+        {QStringLiteral("id"), QStringLiteral("com.example.plugin")},
         {QStringLiteral("name"), QStringLiteral("my-plugin")},
         {QStringLiteral("version"), QStringLiteral("1.0.0")},
         {QStringLiteral("apiVersion"), supportedMaxApi()},
         {QStringLiteral("minManagerVersion"), managerVersion()},
+        {QStringLiteral("permissions"), QJsonArray::fromStringList({
+            QStringLiteral("ui.pages"), QStringLiteral("servers.read"),
+        })},
         {QStringLiteral("entry"), QStringLiteral("plugin.json 中的 frontend/backend 入口")},
     });
     packageSection.insert(QStringLiteral("requiredFields"), strArray({
@@ -1019,8 +1147,11 @@ QJsonObject PackageManager::apiManifest()
 
     QJsonObject backendApi;
     backendApi.insert(QStringLiteral("protocol"), QStringLiteral("JSON lines over stdin/stdout"));
+    backendApi.insert(QStringLiteral("permissionBoundary"),
+                      QStringLiteral("API 2 的 Node 后端由 Node Permission Model 限制文件系统和子进程；"
+                                     "未认证插件不会收到 MCSM_BACKEND/MCSM_HOME。网络访问仍需用户信任插件。"));
     backendApi.insert(QStringLiteral("runtimes"), strArray({
-        QStringLiteral("node"), QStringLiteral("python"), QStringLiteral("exec"), QStringLiteral("auto"),
+        QStringLiteral("node"), QStringLiteral("auto"),
     }));
     backendApi.insert(QStringLiteral("hooks"), strArray({
         QStringLiteral("plugin.install"), QStringLiteral("plugin.enable"),
@@ -1042,6 +1173,11 @@ QJsonObject PackageManager::apiManifest()
     cli.insert(QStringLiteral("enable"), QStringLiteral("mcsm-cli plugin package enable|disable --name <id>"));
     cli.insert(QStringLiteral("remove"), QStringLiteral("mcsm-cli plugin package remove --name <id> [--purge-data]"));
     cli.insert(QStringLiteral("inspect"), QStringLiteral("mcsm-cli plugin package inspect --zip <file>"));
+    cli.insert(QStringLiteral("installWithGrants"),
+               QStringLiteral("mcsm-cli plugin package install --zip <file> [--grant a,b] [--grant-all]"));
+    cli.insert(QStringLiteral("permissions"),
+               QStringLiteral("mcsm-cli plugin package permissions --name <id> "
+                              "[--grant a,b | --revoke-all]"));
     cli.insert(QStringLiteral("call"), QStringLiteral("mcsm-cli plugin call --name <id> --method <name> [--params '{...}']"));
     cli.insert(QStringLiteral("hook"), QStringLiteral("mcsm-cli plugin hook --name <id> --hook <name> [--payload '{...}']"));
     cli.insert(QStringLiteral("service"), QStringLiteral("mcsm-cli plugin service start|stop|status --name <id>"));
@@ -1067,9 +1203,13 @@ QJsonObject PackageManager::apiManifest()
             QStringLiteral("解压后逐个校验落盘路径仍在插件目录内"),
         })},
         {QStringLiteral("entryRules"), QStringLiteral("frontend/backend/web 入口必须是包内相对路径")},
+        {QStringLiteral("permissionPolicy"),
+         QStringLiteral("manifest 声明权限、用户单独授权；未授权能力必须返回 PERMISSION_DENIED。"
+                        "API 1 包不再执行，必须在 manifest 中显式声明 apiVersion=2。")},
     });
     object.insert(QStringLiteral("manager"), QStringLiteral("McServerManager plugin package API"));
     object.insert(QStringLiteral("package"), packageSection);
+    object.insert(QStringLiteral("permissions"), PluginPermissions::catalog());
     object.insert(QStringLiteral("scopes"), scopes);
     object.insert(QStringLiteral("frontend"), frontendApi);
     object.insert(QStringLiteral("backend"), backendApi);

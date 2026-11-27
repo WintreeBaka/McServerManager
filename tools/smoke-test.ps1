@@ -420,7 +420,8 @@ function New-PluginZip {
         [string]$Id,
         [string]$Scope,
         [hashtable]$Extra,
-        [string]$ZipPath
+        [string]$ZipPath,
+        [string[]]$Permissions = @()
     )
     if (-not $zipTool) { return $false }
     $stage = Join-Path $Assets "plugin-$Id"
@@ -431,7 +432,8 @@ function New-PluginZip {
         id          = $Id
         name        = "Smoke $Id"
         version     = "1.0.0"
-        apiVersion  = "1"
+        apiVersion  = 2
+        permissions = $Permissions
         scope       = $Scope
         description = "smoke test plugin"
         author      = "smoke"
@@ -449,10 +451,13 @@ function New-PluginZip {
     if ($Extra.Contains("backend")) {
         New-Item -ItemType Directory -Path (Join-Path $stage "backend") -Force | Out-Null
         @(
-            '@echo off',
-            'set /p REQUEST=',
-            'echo {"ok":true,"data":{"probe":true},"patch":{"jvmArgs":["-XX:+UseG1GC"],"note":"smoke"}}'
-        ) | Set-Content -Path (Join-Path $stage "backend\probe.cmd") -Encoding ASCII
+            'const readline = require("readline");',
+            'readline.createInterface({ input: process.stdin }).on("line", (line) => {',
+            '  const request = JSON.parse(line);',
+            '  const patch = request.method === "server.beforeStart" ? { jvmArgs: ["-XX:+UseG1GC"], note: "smoke" } : undefined;',
+            '  process.stdout.write(JSON.stringify({ ok: true, data: { probe: true }, patch }) + "\n");',
+            '});'
+        ) | Set-Content -Path (Join-Path $stage "backend\index.js") -Encoding UTF8
     }
 
     if (Test-Path $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
@@ -468,13 +473,15 @@ if (-not $zipTool) {
     $backZip = Join-Path $Assets "smoke-backend.zip"
     $globalZip = Join-Path $Assets "smoke-global.zip"
     New-PluginZip -Id "smoke.ui" -Scope "auto" `
-        -Extra @{ frontend = @{ entry = "frontend/index.js" } } -ZipPath $frontZip | Out-Null
+        -Extra @{ frontend = @{ entry = "frontend/index.js" } } -ZipPath $frontZip `
+        -Permissions @("ui.pages", "servers.read") | Out-Null
     New-PluginZip -Id "smoke.backend" -Scope "auto" `
-        -Extra @{ backend = @{ entry = "backend/probe.cmd"; runtime = "exec" };
-                  hooks = @("server.beforeStart") } -ZipPath $backZip | Out-Null
+        -Extra @{ backend = @{ entry = "backend/index.js"; runtime = "node" };
+                  hooks = @("server.beforeStart") } -ZipPath $backZip `
+        -Permissions @("servers.read", "server.start.patch") | Out-Null
     New-PluginZip -Id "smoke.global" -Scope "auto" `
         -Extra @{ frontend = @{ entry = "frontend/index.js" };
-                  backend = @{ entry = "backend/probe.cmd"; runtime = "exec" } } -ZipPath $globalZip | Out-Null
+                  backend = @{ entry = "backend/index.js"; runtime = "node" } } -ZipPath $globalZip | Out-Null
 
     $inspectFront = Invoke-Cli @("plugin", "package", "inspect", "--zip", $frontZip)
     Write-Result "plugin package inspect (frontend)" ($inspectFront.ok -and $inspectFront.data.scope -eq "frontend") `
@@ -490,10 +497,11 @@ if (-not $zipTool) {
         ("scope=" + $inspectGlobal.data.scope)
 
     $api = Invoke-Cli @("plugin", "api")
-    Write-Result "plugin api manifest" ($api.ok -and $api.data.apiVersion -eq "1" -and $api.data.scopes.global) `
+    Write-Result "plugin api manifest" ($api.ok -and $api.data.apiVersion -eq 2 -and $api.data.scopes.global) `
         $api.error.message
 
-    $installFront = Invoke-Cli @("plugin", "package", "install", "--zip", $frontZip)
+    $installFront = Invoke-Cli @("plugin", "package", "install", "--zip", $frontZip,
+                                 "--grant", "ui.pages,servers.read")
     Write-Result "plugin package install (frontend)" `
         ($installFront.ok -and $installFront.data.id -eq "smoke.ui" -and $installFront.data.scope -eq "frontend") `
         $installFront.error.message
@@ -505,11 +513,13 @@ if (-not $zipTool) {
     Write-Result "installing twice is refused" `
         ((-not $reinstall.ok) -and $reinstall.error.code -eq "PLUGIN_EXISTS") ("code=" + $reinstall.error.code)
 
-    $forceInstall = Invoke-Cli @("plugin", "package", "install", "--zip", $frontZip, "--force")
+    $forceInstall = Invoke-Cli @("plugin", "package", "install", "--zip", $frontZip, "--force",
+                                 "--grant", "ui.pages,servers.read")
     Write-Result "--force replaces the plugin" ($forceInstall.ok -and $forceInstall.data.replaced -eq $true) `
         $forceInstall.error.message
 
-    $installBack = Invoke-Cli @("plugin", "package", "install", "--zip", $backZip, "--disabled")
+    $installBack = Invoke-Cli @("plugin", "package", "install", "--zip", $backZip, "--disabled",
+                                "--grant", "servers.read,server.start.patch")
     Write-Result "install --disabled keeps it off" ($installBack.ok -and $installBack.data.enabled -eq $false) `
         $installBack.error.message
 
@@ -576,7 +586,7 @@ if (-not $zipTool) {
         } finally { $archive.Dispose() }
     }
 
-    $manifestJson = '{"id":"smoke.raw","name":"raw","version":"1.0.0","apiVersion":1}'
+    $manifestJson = '{"id":"smoke.raw","name":"raw","version":"1.0.0","apiVersion":2,"permissions":["ui.pages"]}'
 
     # apiVersion 越界 -> 拒绝
     $futureZip = Join-Path $Assets "smoke-future.zip"
@@ -601,18 +611,18 @@ if (-not $zipTool) {
     # 字符串形式仍然接受，但会提示改成整数
     $stringZip = Join-Path $Assets "smoke-stringapi.zip"
     New-RawZip -Path $stringZip -Entries @{
-        "plugin.json" = '{"id":"smoke.stringapi","name":"stringapi","version":"1.0.0","apiVersion":"1"}'
+        "plugin.json" = '{"id":"smoke.stringapi","name":"stringapi","version":"1.0.0","apiVersion":"2","permissions":["ui.pages"]}'
         "frontend/index.js" = 'mcsm.log("string");'
     }
     $stringApi = Invoke-Cli @("plugin", "package", "inspect", "--zip", $stringZip)
     Write-Result "apiVersion 字符串形式兼容并给出提示" `
-        ($stringApi.ok -and $stringApi.data.apiVersion -eq 1 -and $stringApi.warnings.Count -gt 0) `
+        ($stringApi.ok -and $stringApi.data.apiVersion -eq 2 -and $stringApi.warnings.Count -gt 0) `
         ("apiVersion=" + $stringApi.data.apiVersion + " warnings=" + $stringApi.warnings.Count)
 
     # minManagerVersion 只提示，不拦截
     $minVersionZip = Join-Path $Assets "smoke-minversion.zip"
     New-RawZip -Path $minVersionZip -Entries @{
-        "plugin.json" = '{"id":"smoke.minversion","name":"minversion","version":"1.0.0","apiVersion":1,"minManagerVersion":"99.0.0"}'
+        "plugin.json" = '{"id":"smoke.minversion","name":"minversion","version":"1.0.0","apiVersion":2,"minManagerVersion":"99.0.0","permissions":["ui.pages"]}'
         "frontend/index.js" = 'mcsm.log("min");'
     }
     $minVersion = Invoke-Cli @("plugin", "package", "inspect", "--zip", $minVersionZip)
@@ -644,7 +654,7 @@ if (-not $zipTool) {
     # 入口指向包外 -> 拒绝
     $escapeZip = Join-Path $Assets "smoke-entryescape.zip"
     New-RawZip -Path $escapeZip -Entries @{
-        "plugin.json" = '{"id":"smoke.escape","name":"escape","version":"1.0.0","apiVersion":1,"backend":{"entry":"../../evil.exe"}}'
+        "plugin.json" = '{"id":"smoke.escape","name":"escape","version":"1.0.0","apiVersion":2,"permissions":[],"backend":{"entry":"../../evil.exe"}}'
     }
     $escape = Invoke-Cli @("plugin", "package", "inspect", "--zip", $escapeZip) -AllowFailure
     Write-Result "入口越界被拒绝" `
@@ -653,14 +663,230 @@ if (-not $zipTool) {
 
     $apiInfo = Invoke-Cli @("plugin", "api")
     Write-Result "plugin api 暴露区间与安全策略" `
-        ($apiInfo.ok -and $apiInfo.data.apiVersion -eq 1 -and $apiInfo.data.supportedMinApi -eq 1 `
-            -and $apiInfo.data.supportedMaxApi -ge 1 -and $apiInfo.data.apiVersionPolicy.type -eq "integer" `
-            -and $apiInfo.data.security.installRootPolicy) `
+        ($apiInfo.ok -and $apiInfo.data.apiVersion -eq 2 -and $apiInfo.data.supportedMinApi -eq 2 `
+            -and $apiInfo.data.supportedMaxApi -eq 2 -and $apiInfo.data.apiVersionPolicy.type -eq "integer" `
+            -and $apiInfo.data.security.installRootPolicy -and $apiInfo.data.permissions.Count -ge 10) `
         "missing apiVersionPolicy/security in plugin api output"
 
     Write-Result "插件目录外的安装被拒绝" `
         ((Invoke-Cli @("plugin", "package", "install", "--zip", $frontZip, "--expect", "../evil") -AllowFailure).ok -eq $false) `
         "expected an id mismatch / unsafe path rejection"
+
+    # ------------------------------------------------ permission model -------
+    Write-Host ""
+    Write-Host "plugin permission model" -ForegroundColor Cyan
+
+    if ($nodeAvailable) {
+        $permissionBackend = @'
+const fs = require("fs");
+const cp = require("child_process");
+const readline = require("readline");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  let request;
+  try {
+    request = JSON.parse(line);
+    const params = request.params || {};
+    let data = {};
+    if (request.method === "read")
+      data = { text: fs.readFileSync(params.path, "utf8") };
+    else if (request.method === "write") {
+      fs.writeFileSync(params.path, params.text);
+      data = { written: true };
+    } else if (request.method === "spawn")
+      data = { text: cp.execFileSync(process.execPath,
+        ["-e", "process.stdout.write('spawned')"], { encoding: "utf8" }) };
+    else if (request.method === "env")
+      data = {
+        backend: process.env.MCSM_BACKEND || "",
+        home: process.env.MCSM_HOME || "",
+        granted: process.env.MCSM_GRANTED_PERMISSIONS || ""
+      };
+    else
+      data = { called: request.method };
+    process.stdout.write(JSON.stringify({ ok: true, data }) + "\n");
+  } catch (error) {
+    process.stdout.write(JSON.stringify({
+      ok: false,
+      error: { code: error.code || "PLUGIN_ERROR", message: error.message }
+    }) + "\n");
+  }
+});
+'@
+        $permissionManifest = @{
+            id = "smoke.permission"
+            name = "Snow permission boundary"
+            version = "1.0.0"
+            apiVersion = 2
+            scope = "backend"
+            permissions = @(
+                "filesystem.server.read",
+                "filesystem.server.write",
+                "process.spawn",
+                "servers.read",
+                "config.write"
+            )
+            backend = @{ entry = "backend/index.js"; runtime = "node"; timeoutMs = 10000 }
+            hooks = @("server.beforeStart")
+        } | ConvertTo-Json -Depth 6
+        $permissionZip = Join-Path $Assets "smoke-permission.zip"
+        New-RawZip -Path $permissionZip -Entries @{
+            "plugin.json" = $permissionManifest
+            "backend/index.js" = $permissionBackend
+        }
+
+        $permissionTargetDir = Join-Path $DataRoot "servers"
+        New-Item -ItemType Directory -Force -Path $permissionTargetDir | Out-Null
+        $permissionTarget = Join-Path $permissionTargetDir "permission-probe.txt"
+        Set-Content -Path $permissionTarget -Value "protected" -Encoding UTF8
+        $permissionWriteTarget = Join-Path $permissionTargetDir "permission-written.txt"
+        # Windows PowerShell 5.1 strips JSON quotes from native argv. Escaping
+        # them here exercises the same CLI syntax documented for other shells.
+        $readParams = (@{ path = $permissionTarget } | ConvertTo-Json -Compress).Replace('"', '\"')
+        $writeParams = (@{ path = $permissionWriteTarget; text = "allowed" } |
+            ConvertTo-Json -Compress).Replace('"', '\"')
+
+        $permissionInstall = Invoke-Cli @(
+            "plugin", "package", "install", "--zip", $permissionZip)
+        Write-Result "API 2 install defaults to zero grants" `
+            ($permissionInstall.ok -and $permissionInstall.data.grantedPermissions.Count -eq 0) `
+            $permissionInstall.error.message
+
+        $permissionView = Invoke-Cli @(
+            "plugin", "package", "permissions", "--name", "smoke.permission")
+        Write-Result "permission view does not mutate grants" `
+            ($permissionView.ok -and $permissionView.data.grantedPermissions.Count -eq 0) `
+            $permissionView.error.message
+
+        $unknownGrant = Invoke-Cli @(
+            "plugin", "package", "permissions", "--name", "smoke.permission",
+            "--grant", "unknown.permission") -AllowFailure
+        Write-Result "unknown permission is rejected" `
+            ((-not $unknownGrant.ok) -and $unknownGrant.error.code -eq "INVALID_PERMISSIONS") `
+            ($unknownGrant.error.code + " " + $unknownGrant.error.detail)
+
+        $undeclaredGrant = Invoke-Cli @(
+            "plugin", "package", "permissions", "--name", "smoke.permission",
+            "--grant", "server.delete") -AllowFailure
+        Write-Result "undeclared permission is rejected" `
+            ((-not $undeclaredGrant.ok) -and $undeclaredGrant.error.code -eq "INVALID_PERMISSIONS") `
+            ($undeclaredGrant.error.code + " " + $undeclaredGrant.error.detail)
+
+        $deniedRead = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "read",
+            "--params", $readParams) -AllowFailure
+        Write-Result "zero-grant plugin cannot read server files" `
+            ((-not $deniedRead.ok) -and $deniedRead.error.code -eq "ERR_ACCESS_DENIED") `
+            ($deniedRead.error.code + " " + $deniedRead.error.message)
+
+        $deniedWrite = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "write",
+            "--params", $writeParams) -AllowFailure
+        Write-Result "zero-grant plugin cannot write server files" `
+            ((-not $deniedWrite.ok) -and (-not (Test-Path $permissionWriteTarget))) `
+            ($deniedWrite.error.code + " " + $deniedWrite.error.message)
+
+        $deniedSpawn = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "spawn") -AllowFailure
+        Write-Result "zero-grant plugin cannot spawn processes" `
+            ((-not $deniedSpawn.ok) -and $deniedSpawn.error.code -eq "ERR_ACCESS_DENIED") `
+            ($deniedSpawn.error.code + " " + $deniedSpawn.error.message)
+
+        $deniedHook = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission",
+            "--method", "server.beforeStart") -AllowFailure
+        Write-Result "server hooks require servers.read" `
+            ((-not $deniedHook.ok) -and $deniedHook.error.code -eq "PERMISSION_DENIED" -and
+                $deniedHook.error.detail -match "servers.read") `
+            ($deniedHook.error.code + " " + $deniedHook.error.detail)
+
+        $readGrant = Invoke-Cli @(
+            "plugin", "package", "permissions", "--name", "smoke.permission",
+            "--grant", "filesystem.server.read")
+        $allowedRead = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "read",
+            "--params", $readParams) -AllowFailure
+        Write-Result "granting filesystem.server.read enables reads" `
+            ($readGrant.ok -and $allowedRead.ok -and $allowedRead.data.data.text.Trim() -eq "protected") `
+            ($allowedRead.error.code + " " + $allowedRead.error.message)
+
+        $writeStillDenied = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "write",
+            "--params", $writeParams) -AllowFailure
+        Write-Result "read grant does not imply write" `
+            ((-not $writeStillDenied.ok) -and (-not (Test-Path $permissionWriteTarget))) `
+            ($writeStillDenied.error.code + " " + $writeStillDenied.error.message)
+
+        $broadGrant = Invoke-Cli @(
+            "plugin", "package", "permissions", "--name", "smoke.permission",
+            "--grant", "filesystem.server.read,filesystem.server.write,process.spawn,servers.read")
+        $allowedWrite = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "write",
+            "--params", $writeParams) -AllowFailure
+        Write-Result "filesystem.server.write enables writes" `
+            ($broadGrant.ok -and $allowedWrite.ok -and $allowedWrite.data.data.written -eq $true) `
+            ($allowedWrite.error.code + " " + $allowedWrite.error.message)
+
+        $allowedSpawn = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "spawn") -AllowFailure
+        Write-Result "process.spawn enables child processes" `
+            ($allowedSpawn.ok -and $allowedSpawn.data.data.text -eq "spawned") `
+            ($allowedSpawn.error.code + " " + $allowedSpawn.error.message)
+
+        $allowedHook = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission",
+            "--method", "server.beforeStart") -AllowFailure
+        Write-Result "servers.read enables server hooks" `
+            ($allowedHook.ok -and $allowedHook.data.data.called -eq "server.beforeStart") `
+            ($allowedHook.error.code + " " + $allowedHook.error.message)
+
+        $environment = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "env") -AllowFailure
+        Write-Result "plugin environment omits manager control paths" `
+            ($environment.ok -and $environment.data.data.backend -eq "" -and
+                $environment.data.data.home -eq "") `
+            ("backend=" + $environment.data.data.backend + " home=" + $environment.data.data.home)
+
+        $upgradeManifest = @{
+            id = "smoke.permission"
+            name = "Snow permission boundary"
+            version = "1.1.0"
+            apiVersion = 2
+            scope = "backend"
+            permissions = @(
+                "filesystem.server.read",
+                "filesystem.server.write",
+                "process.spawn",
+                "servers.read",
+                "config.write"
+            )
+            backend = @{ entry = "backend/index.js"; runtime = "node"; timeoutMs = 10000 }
+            hooks = @("server.beforeStart")
+        } | ConvertTo-Json -Depth 6
+        $upgradeZip = Join-Path $Assets "smoke-permission-upgrade.zip"
+        New-RawZip -Path $upgradeZip -Entries @{
+            "plugin.json" = $upgradeManifest
+            "backend/index.js" = $permissionBackend
+        }
+        $upgrade = Invoke-Cli @(
+            "plugin", "package", "install", "--zip", $upgradeZip, "--force")
+        $upgradeGrants = @($upgrade.data.grantedPermissions)
+        Write-Result "upgrade preserves old grants and withholds new permissions" `
+            ($upgrade.ok -and $upgrade.data.version -eq "1.1.0" -and
+                $upgradeGrants -contains "filesystem.server.read" -and
+                $upgradeGrants -contains "servers.read" -and
+                -not ($upgradeGrants -contains "config.write")) `
+            ("grants=" + ($upgradeGrants -join ","))
+
+        $revokeAll = Invoke-Cli @(
+            "plugin", "package", "permissions", "--name", "smoke.permission", "--revoke-all")
+        $readAfterRevoke = Invoke-Cli @(
+            "plugin", "call", "--name", "smoke.permission", "--method", "read",
+            "--params", $readParams) -AllowFailure
+        Write-Result "revoke-all immediately removes capabilities" `
+            ($revokeAll.ok -and $revokeAll.data.grantedPermissions.Count -eq 0 -and
+                (-not $readAfterRevoke.ok) -and $readAfterRevoke.error.code -eq "ERR_ACCESS_DENIED") `
+            ($readAfterRevoke.error.code + " " + $readAfterRevoke.error.message)
+    }
 
     # -------------------------------------------------- official plugin -------
     $officialDir = Join-Path (Split-Path -Parent $PSScriptRoot) "plugins\official\player-admin"
@@ -668,11 +894,10 @@ if (-not $zipTool) {
         $officialZip = Join-Path $Assets "official-player-admin.zip"
         Push-Location $officialDir
         try { & $zipTool a -tzip $officialZip "." -y -bso0 -bsp0 | Out-Null } finally { Pop-Location }
-        $official = Invoke-Cli @("plugin", "package", "inspect", "--zip", $officialZip)
-        Write-Result "official player-admin package is valid" `
-            ($official.ok -and $official.data.scope -eq "global" -and $official.data.apiVersion -eq 1 `
-                -and $official.data.hasFrontend -and $official.data.hasBackend) `
-            ("scope=" + $official.data.scope + " api=" + $official.data.apiVersion)
+        $official = Invoke-Cli @("plugin", "package", "inspect", "--zip", $officialZip) -AllowFailure
+        Write-Result "official API 1 package is blocked pending migration" `
+            ((-not $official.ok) -and $official.error.detail -match "apiVersion") `
+            ("code=" + $official.error.code + " detail=" + $official.error.detail)
     }
 
     # ------------------------------------------------- audit regressions -----
@@ -710,8 +935,9 @@ if (-not $zipTool) {
         $slowDir = Join-Path $DataRoot "audit-slow"
         New-Item -ItemType Directory -Force -Path $slowDir | Out-Null
         $slowManifest = @{
-            id = "com.smoke.slow"; name = "slow"; version = "1.0.0"; apiVersion = 1
+            id = "com.smoke.slow"; name = "slow"; version = "1.0.0"; apiVersion = 2
             scope = "backend"; license = "MIT"
+            permissions = @("servers.read")
             backend = @{ entry = "backend/index.js"; runtime = "node"; timeoutMs = 250 }
             hooks = @("server.beforeStart")
         } | ConvertTo-Json -Depth 5
@@ -720,7 +946,8 @@ if (-not $zipTool) {
             "plugin.json" = $slowManifest
             "backend/index.js" = "setTimeout(function(){process.stdout.write(JSON.stringify({ok:true,data:{}})+'\n');},2000);"
         }
-        $installSlow = Invoke-Cli @("plugin", "package", "install", "--zip", $slowZip) -HomeDir $auditHome
+        $installSlow = Invoke-Cli @("plugin", "package", "install", "--zip", $slowZip,
+                                    "--grant", "servers.read") -HomeDir $auditHome
         $slowCall = Invoke-Cli @("plugin", "call", "--name", "com.smoke.slow",
                                  "--method", "server.beforeStart") -AllowFailure -HomeDir $auditHome
         Write-Result "backend.timeoutMs is honoured" `

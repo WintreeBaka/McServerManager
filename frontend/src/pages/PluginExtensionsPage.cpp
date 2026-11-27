@@ -1,7 +1,9 @@
 #include "pages/PluginExtensionsPage.h"
 
 #include <QCoreApplication>
+#include <QCheckBox>
 #include <QDesktopServices>
+#include <QDialog>
 #include <QDir>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -9,6 +11,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSet>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -189,6 +192,7 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
     const QString id = plugin.value(QStringLiteral("id")).toString();
     const QString name = plugin.value(QStringLiteral("name")).toString(id);
     const bool enabled = plugin.value(QStringLiteral("enabled")).toBool();
+    const bool eligible = plugin.value(QStringLiteral("runtimeEligible")).toBool(true);
 
     auto *head = new QHBoxLayout();
     head->setSpacing(8);
@@ -202,8 +206,12 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
     scope->setTone(toneForScope(plugin.value(QStringLiteral("scope")).toString()));
     scope->setCompact(true);
     head->addWidget(scope);
-    auto *state = new Chip(enabled ? QStringLiteral("已启用") : QStringLiteral("已停用"), row);
-    state->setTone(enabled ? Chip::Success : Chip::Neutral);
+    auto *state = new Chip(!eligible ? QStringLiteral("API 不兼容")
+                                    : (enabled ? QStringLiteral("已启用")
+                                               : QStringLiteral("已停用")),
+                           row);
+    state->setTone(!eligible ? Chip::Danger
+                            : (enabled ? Chip::Success : Chip::Neutral));
     state->setCompact(true);
     head->addWidget(state);
     head->addStretch(1);
@@ -211,6 +219,7 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
     auto *toggle = new ToggleSwitch(row);
     toggle->setOnText(QStringLiteral("启用"), QStringLiteral("停用"));
     toggle->setChecked(enabled);
+    toggle->setEnabled(eligible);
     toggle->setToolTip(enabled ? QStringLiteral("点击停用该插件") : QStringLiteral("点击启用该插件"));
     head->addWidget(toggle);
     layout->addLayout(head);
@@ -233,16 +242,31 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
                            QStringLiteral("hint"), row);
     layout->addWidget(meta);
 
+    const QJsonArray details = plugin.value(QStringLiteral("permissionDetails")).toArray();
+    const QJsonArray grants = plugin.value(QStringLiteral("grantedPermissions")).toArray();
+    auto *permissionState = makeLabel(
+        eligible ? QStringLiteral("权限：已授权 %1 / %2 项").arg(grants.size()).arg(details.size())
+                 : QStringLiteral("⚠ %1").arg(
+                       plugin.value(QStringLiteral("validationErrors")).toArray().isEmpty()
+                           ? QStringLiteral("插件需要迁移到 API 2")
+                           : QStringLiteral("插件校验失败，已阻止执行")),
+        eligible ? QStringLiteral("hint") : QStringLiteral("warning"), row);
+    permissionState->setWordWrap(true);
+    layout->addWidget(permissionState);
+
     auto *actions = new QHBoxLayout();
     actions->setSpacing(8);
-    if (plugin.value(QStringLiteral("hasFrontend")).toBool()) {
+    bool canUseUi = false;
+    for (const QJsonValue &grant : grants)
+        canUseUi = canUseUi || grant.toString() == QLatin1String("ui.pages");
+    if (plugin.value(QStringLiteral("hasFrontend")).toBool() && eligible && canUseUi) {
         auto *open = new GradientButton(QStringLiteral("打开页面"), row);
         open->setStyle(GradientButton::Soft);
         open->setCompact(true);
         connect(open, &QPushButton::clicked, this, [this, id]() { openPluginPage(id); });
         actions->addWidget(open);
     }
-    if (plugin.value(QStringLiteral("hasWeb")).toBool()
+    if (plugin.value(QStringLiteral("hasWeb")).toBool() && eligible
         && !plugin.value(QStringLiteral("webEntry")).toString().isEmpty()) {
         auto *panel = new GradientButton(QStringLiteral("打开面板"), row);
         panel->setStyle(GradientButton::Soft);
@@ -257,6 +281,13 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
         openFolder(plugin.value(QStringLiteral("path")).toString());
     });
     actions->addWidget(folder);
+    auto *permissions = new GradientButton(QStringLiteral("权限"), row);
+    permissions->setStyle(GradientButton::Soft);
+    permissions->setCompact(true);
+    permissions->setEnabled(eligible);
+    connect(permissions, &QPushButton::clicked, this,
+            [this, plugin]() { managePermissions(plugin); });
+    actions->addWidget(permissions);
     auto *remove = new GradientButton(QStringLiteral("卸载"), row);
     remove->setStyle(GradientButton::Danger);
     remove->setCompact(true);
@@ -265,10 +296,99 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
     actions->addStretch(1);
     layout->addLayout(actions);
 
-    connect(toggle, &ToggleSwitch::toggled, this, [this, id](bool checked) {
-        setEnabled(id, checked);
-    });
+    if (eligible) {
+        connect(toggle, &ToggleSwitch::toggled, this, [this, id](bool checked) {
+            setEnabled(id, checked);
+        });
+    }
     return row;
+}
+
+void PluginExtensionsPage::managePermissions(const QJsonObject &plugin)
+{
+    const QString pluginId = plugin.value(QStringLiteral("id")).toString();
+    const QJsonArray details = plugin.value(QStringLiteral("permissionDetails")).toArray();
+    QSet<QString> granted;
+    for (const QJsonValue &value :
+         plugin.value(QStringLiteral("grantedPermissions")).toArray())
+        granted.insert(value.toString());
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("管理插件权限"));
+    dialog.setMinimumWidth(580);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(22, 20, 22, 18);
+    layout->setSpacing(10);
+    layout->addWidget(makeLabel(
+        QStringLiteral("%1 (%2)").arg(
+            plugin.value(QStringLiteral("name")).toString(pluginId), pluginId),
+        QStringLiteral("subtitle"), &dialog));
+    auto *warning = makeLabel(
+        QStringLiteral("权限可随时关闭。关闭后插件仍可运行，但对应功能可能异常；"
+                       "权限拒绝会以通知和日志形式输出。"),
+        QStringLiteral("warning"), &dialog);
+    warning->setWordWrap(true);
+    layout->addWidget(warning);
+
+    QVector<QCheckBox *> checks;
+    for (const QJsonValue &value : details) {
+        const QJsonObject detail = value.toObject();
+        const QString id = detail.value(QStringLiteral("id")).toString();
+        auto *check = new QCheckBox(
+            QStringLiteral("%1 (%2) · %3")
+                .arg(detail.value(QStringLiteral("label")).toString(id), id,
+                     detail.value(QStringLiteral("risk")).toString()),
+            &dialog);
+        check->setToolTip(detail.value(QStringLiteral("description")).toString());
+        check->setChecked(granted.contains(id));
+        check->setProperty("permissionId", id);
+        layout->addWidget(check);
+        checks.append(check);
+    }
+    if (checks.isEmpty())
+        layout->addWidget(makeLabel(QStringLiteral("该插件没有声明任何能力。"),
+                                    QStringLiteral("hint"), &dialog));
+
+    auto *buttons = new QHBoxLayout();
+    buttons->addStretch(1);
+    auto *cancel = new GradientButton(QStringLiteral("取消"), &dialog);
+    cancel->setStyle(GradientButton::Outline);
+    cancel->setCompact(true);
+    auto *save = new GradientButton(QStringLiteral("保存权限"), &dialog);
+    save->setCompact(true);
+    buttons->addWidget(cancel);
+    buttons->addWidget(save);
+    layout->addLayout(buttons);
+    connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(save, &QPushButton::clicked, &dialog, &QDialog::accept);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    QStringList selected;
+    for (QCheckBox *check : checks) {
+        if (check->isChecked())
+            selected << check->property("permissionId").toString();
+    }
+    setStatus(QStringLiteral("正在保存 %1 的权限…").arg(pluginId));
+    AppContext::instance()->backend()->request(
+        {QStringLiteral("plugin"), QStringLiteral("package"), QStringLiteral("permissions"),
+         QStringLiteral("--name"), pluginId, QStringLiteral("--grant"),
+         selected.join(QLatin1Char(','))},
+        this, [this, pluginId](const Reply &reply) {
+            if (!reply.ok) {
+                setStatus(QStringLiteral("保存权限失败：%1").arg(reply.errorText()));
+                AppContext::instance()->logActivity(
+                    QStringLiteral("插件 %1 权限保存失败：%2").arg(pluginId, reply.errorText()),
+                    QStringLiteral("error"));
+                return;
+            }
+            setStatus(QStringLiteral("✔ 已更新 %1 的权限；功能异常会输出到通知和日志")
+                          .arg(pluginId));
+            AppContext::instance()->logActivity(
+                QStringLiteral("已更新插件 %1 的权限").arg(pluginId),
+                QStringLiteral("success"));
+            AppContext::instance()->plugins()->reload();
+        });
 }
 
 void PluginExtensionsPage::openImport()

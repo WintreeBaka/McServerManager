@@ -67,6 +67,8 @@ QStringList CommandRouter::helpLines() const
         QStringLiteral("  plugin packages [--enabled]                  已安装的扩展插件包"),
         QStringLiteral("  plugin package install --zip <file> | --url <url> [--force]"),
         QStringLiteral("  plugin package info|enable|disable|remove --name <plugin-id>"),
+        QStringLiteral("  plugin package permissions --name <id> [--grant a,b | --revoke-all]"),
+        QStringLiteral("  plugin package install ... [--grant a,b | --grant-all]"),
         QStringLiteral("  plugin package inspect --zip <file>          预览插件包（不安装）"),
         QStringLiteral("  plugin call --name <id> --method <name> [--params '{...}']"),
         QStringLiteral("  plugin hook --name <id>|--all --hook <name> [--payload '{...}']"),
@@ -814,6 +816,13 @@ Result CommandRouter::cmdPluginPackage()
             request.expectId = m_args.value(QStringLiteral("expect"));
             request.force = m_args.boolValue(QStringLiteral("force"), false);
             request.enable = !m_args.boolValue(QStringLiteral("disabled"), false);
+            request.grantAll = m_args.boolValue(QStringLiteral("grant-all"), false);
+            request.grantSpecified = m_args.has(QStringLiteral("grant"));
+            if (request.grantSpecified) {
+                const QString grantValue = m_args.value(QStringLiteral("grant"));
+                request.grantedPermissions = grantValue.split(QLatin1Char(','),
+                                                               Qt::SkipEmptyParts);
+            }
             Result result = PackageManager::install(request);
             if (!result.isOk())
                 return result;
@@ -893,6 +902,17 @@ Result CommandRouter::cmdPluginPackage()
             data.insert(QStringLiteral("problems"), QJsonArray::fromStringList(validation.warnings));
             data.insert(QStringLiteral("alreadyInstalled"),
                         !manifest.id.isEmpty() && PackageManager::exists(manifest.id));
+            if (!manifest.id.isEmpty() && PackageManager::exists(manifest.id)) {
+                const PluginManifest existing = PackageManager::find(manifest.id);
+                data.insert(QStringLiteral("currentGrantedPermissions"),
+                            QJsonArray::fromStringList(existing.grantedPermissions));
+                QJsonArray additions;
+                for (const QString &permission : manifest.permissions) {
+                    if (!existing.permissions.contains(permission))
+                        additions.append(permission);
+                }
+                data.insert(QStringLiteral("newPermissions"), additions);
+            }
             Archive::removeTree(staging, nullptr);
             Result result = Result::ok(withToolInfo(data));
             for (const QString &warning : validation.warnings)
@@ -951,6 +971,26 @@ Result CommandRouter::cmdPluginPackage()
             for (const QString &warning : hooks.warnings())
                 result.warn(warning);
             return result;
+        }
+        if (sub == QLatin1String("permissions") || sub == QLatin1String("permission")) {
+            if (name.isEmpty())
+                return Result::fail(QStringLiteral("INVALID_ARGUMENT"),
+                                    QStringLiteral("缺少 --name <插件 id>"));
+            const bool revokeAll =
+                m_args.boolValue(QStringLiteral("revoke-all"), false);
+            if (!m_args.has(QStringLiteral("grant")) && !revokeAll) {
+                const PluginManifest manifest = PackageManager::find(name);
+                if (manifest.id.isEmpty())
+                    return Result::fail(QStringLiteral("NOT_FOUND"),
+                                        QStringLiteral("插件 %1 未安装").arg(name));
+                return Result::ok(withToolInfo(manifest.toJson()));
+            }
+            QStringList grants;
+            if (!revokeAll) {
+                grants = m_args.value(QStringLiteral("grant"))
+                             .split(QLatin1Char(','), Qt::SkipEmptyParts);
+            }
+            return PackageManager::setPermissions(name, grants);
         }
         return Result::fail(QStringLiteral("UNKNOWN_ACTION"),
                             QStringLiteral("未知 plugin package 子命令 '%1'").arg(sub));

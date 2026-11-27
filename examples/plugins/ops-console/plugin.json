@@ -2,13 +2,13 @@
   "id": "com.example.ops-console",
   "name": "运维面板示例",
   "version": "1.0.0",
-  "apiVersion": 1,
-  "minManagerVersion": "1.1.1",
+  "apiVersion": 2,
+  "minManagerVersion": "1.3.0",
   "scope": "global",
   "description": "全局插件示例：前端页面 + 后端 JSON-Line 服务 + Web 支持库面板（本地 HTTP 服务）。",
   "author": "McServerManager",
   "license": "MIT",
-  "permissions": ["ui.pages", "server.read", "network.listen"],
+  "permissions": ["ui.pages", "servers.read", "web.service"],
   "frontend": {
     "entry": "frontend/index.js"
   },

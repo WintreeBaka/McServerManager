@@ -17,6 +17,7 @@
 #include "core/Logger.h"
 #include "core/ProcessRunner.h"
 #include "core/StringUtil.h"
+#include "plugin/PluginPermissions.h"
 
 namespace mcsm {
 namespace {
@@ -61,10 +62,45 @@ QVector<PluginManifest> runnablePlugins()
 {
     QVector<PluginManifest> result;
     for (const PluginManifest &manifest : PackageManager::installed(false)) {
-        if (manifest.hasBackend() && !manifest.backendEntry().isEmpty())
+        if (manifest.runtimeEligible && manifest.hasBackend() && !manifest.backendEntry().isEmpty())
             result.append(manifest);
     }
     return result;
+}
+
+QString hookPermission(const QString &method)
+{
+    if (method.startsWith(QLatin1String("server.")))
+        return QStringLiteral("servers.read");
+    return QString();
+}
+
+QStringList nodePermissionArguments(const PluginManifest &manifest)
+{
+    QStringList args;
+    args << QStringLiteral("--permission")
+         << QStringLiteral("--allow-fs-read=%1").arg(QDir::toNativeSeparators(manifest.path))
+         << QStringLiteral("--allow-fs-read=%1")
+                .arg(QDir::toNativeSeparators(AppPaths::pluginDataDir(manifest.id)))
+         << QStringLiteral("--allow-fs-write=%1")
+                .arg(QDir::toNativeSeparators(AppPaths::pluginDataDir(manifest.id)));
+    if (PluginPermissions::isGranted(manifest.grantedPermissions,
+                                     QStringLiteral("filesystem.server.read"))
+        || PluginPermissions::isGranted(manifest.grantedPermissions,
+                                        QStringLiteral("filesystem.server.write"))) {
+        args << QStringLiteral("--allow-fs-read=%1")
+                    .arg(QDir::toNativeSeparators(AppPaths::serversDir()));
+    }
+    if (PluginPermissions::isGranted(manifest.grantedPermissions,
+                                     QStringLiteral("filesystem.server.write"))) {
+        args << QStringLiteral("--allow-fs-write=%1")
+                    .arg(QDir::toNativeSeparators(AppPaths::serversDir()));
+    }
+    if (PluginPermissions::isGranted(manifest.grantedPermissions,
+                                     QStringLiteral("process.spawn"))) {
+        args << QStringLiteral("--allow-child-process");
+    }
+    return args;
 }
 
 } // namespace
@@ -150,9 +186,18 @@ bool PluginRuntime::resolveLaunch(const PluginManifest &manifest,
             return false;
         }
         resolved.program = node;
+        QDir().mkpath(AppPaths::pluginDataDir(manifest.id));
+        if (manifest.apiVersion >= 2)
+            resolved.arguments << nodePermissionArguments(manifest);
         resolved.arguments << script;
         resolved.label = QStringLiteral("node");
     } else if (runtime == QLatin1String("python")) {
+        if (manifest.apiVersion >= 2) {
+            if (error)
+                *error = QStringLiteral("API 2 后端当前只支持 Node.js 沙箱；"
+                                        "Python/Java/原生进程因缺少统一权限边界而被拒绝");
+            return false;
+        }
         const QString python = ProcessRunner::resolveProgram(
             {QStringLiteral("python"), QStringLiteral("python3"), QStringLiteral("py")});
         if (python.isEmpty()) {
@@ -164,6 +209,12 @@ bool PluginRuntime::resolveLaunch(const PluginManifest &manifest,
         resolved.arguments << script;
         resolved.label = QStringLiteral("python");
     } else if (runtime == QLatin1String("java")) {
+        if (manifest.apiVersion >= 2) {
+            if (error)
+                *error = QStringLiteral("API 2 后端当前只支持 Node.js 沙箱；"
+                                        "Python/Java/原生进程因缺少统一权限边界而被拒绝");
+            return false;
+        }
         const QString java = ProcessRunner::resolveProgram({QStringLiteral("java")});
         if (java.isEmpty()) {
             if (error)
@@ -174,6 +225,11 @@ bool PluginRuntime::resolveLaunch(const PluginManifest &manifest,
         resolved.arguments << QStringLiteral("-jar") << script;
         resolved.label = QStringLiteral("java");
     } else {
+        if (manifest.apiVersion >= 2) {
+            if (error)
+                *error = QStringLiteral("API 2 不允许直接执行原生程序；请使用 Node.js 后端");
+            return false;
+        }
         resolved.program = script;
         resolved.label = QStringLiteral("exec");
     }
@@ -201,6 +257,26 @@ PluginCallOutcome PluginRuntime::call(const PluginManifest &manifest,
     outcome.pluginId = manifest.id;
     outcome.method = method;
 
+    if (!manifest.runtimeEligible || manifest.apiVersion < PackageManager::supportedMinApi()) {
+        outcome.code = QStringLiteral("PLUGIN_API_UNSUPPORTED");
+        outcome.message = QStringLiteral("插件 %1 与当前插件 API 不兼容").arg(manifest.id);
+        outcome.detail = manifest.validationErrors.join(QStringLiteral("\n"));
+        Logger::warn(QStringLiteral("plugin"),
+                     QStringLiteral("blocked incompatible plugin %1").arg(manifest.id));
+        return outcome;
+    }
+    const QString required = hookPermission(method);
+    if (!required.isEmpty()
+        && !PluginPermissions::isGranted(manifest.grantedPermissions, required)) {
+        outcome.code = QStringLiteral("PERMISSION_DENIED");
+        outcome.message = QStringLiteral("插件 %1 没有服务器读取权限").arg(manifest.id);
+        outcome.detail = QStringLiteral("所需权限：servers.read；请在插件管理页面授权");
+        Logger::warn(QStringLiteral("plugin"),
+                     QStringLiteral("permission denied for %1 method %2")
+                         .arg(manifest.id, method));
+        return outcome;
+    }
+
     Launch launch;
     QString launchError;
     if (!resolveLaunch(manifest, QString(), &launch, &launchError)) {
@@ -220,6 +296,8 @@ PluginCallOutcome PluginRuntime::call(const PluginManifest &manifest,
     request.insert(QStringLiteral("dataDir"), AppPaths::pluginDataDir(manifest.id));
     request.insert(QStringLiteral("requestedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
     request.insert(QStringLiteral("managerVersion"), QCoreApplication::applicationVersion());
+    request.insert(QStringLiteral("permissions"),
+                   QJsonArray::fromStringList(manifest.grantedPermissions));
 
     const QByteArray payload = QJsonDocument(request).toJson(QJsonDocument::Compact) + "\n";
     const int effectiveTimeout =
@@ -228,8 +306,13 @@ PluginCallOutcome PluginRuntime::call(const PluginManifest &manifest,
     QElapsedTimer timer;
     timer.start();
     QProcessEnvironment pluginEnvironment = QProcessEnvironment::systemEnvironment();
-    pluginEnvironment.insert(QStringLiteral("MCSM_BACKEND"), QCoreApplication::applicationFilePath());
-    pluginEnvironment.insert(QStringLiteral("MCSM_HOME"), AppPaths::root());
+    pluginEnvironment.remove(QStringLiteral("MCSM_BACKEND"));
+    pluginEnvironment.remove(QStringLiteral("MCSM_HOME"));
+    pluginEnvironment.insert(QStringLiteral("MCSM_PLUGIN_ID"), manifest.id);
+    pluginEnvironment.insert(QStringLiteral("MCSM_PLUGIN_DATA"),
+                             AppPaths::pluginDataDir(manifest.id));
+    pluginEnvironment.insert(QStringLiteral("MCSM_GRANTED_PERMISSIONS"),
+                             manifest.grantedPermissions.join(QLatin1Char(',')));
     pluginEnvironment.insert(QStringLiteral("MCSM_MANAGER_VERSION"), QCoreApplication::applicationVersion());
     const ProcessResult result = ProcessRunner::run(launch.program, launch.arguments, effectiveTimeout,
                                                     payload, launch.workingDirectory, pluginEnvironment);
@@ -409,6 +492,18 @@ Result PluginRuntime::refreshStartPatch(const ServerRecord &record)
                               outcome.detail.isEmpty() ? outcome.message : outcome.detail);
             continue;
         }
+        const bool hasPatch = !outcome.patch.isEmpty();
+        const bool canPatch = PluginPermissions::isGranted(
+            manifest.grantedPermissions, QStringLiteral("server.start.patch"));
+        if (hasPatch && !canPatch) {
+            const QString warning =
+                QStringLiteral("插件 %1 生成了启动参数修改，但用户未授予 "
+                               "server.start.patch，修改已忽略")
+                    .arg(manifest.id);
+            notes << warning;
+            Logger::warn(QStringLiteral("plugin"), warning);
+            continue;
+        }
         if (outcome.patch.value(QStringLiteral("cancel")).toBool(false)) {
             return Result::fail(
                 QStringLiteral("PLUGIN_CANCELLED_START"),
@@ -421,8 +516,18 @@ Result PluginRuntime::refreshStartPatch(const ServerRecord &record)
                 jvmArgs << arg;
         }
         const QStringList dargs = Json::toList(outcome.patch.value(QStringLiteral("dockerArgs")));
-        for (const QString &arg : dargs)
-            dockerArgs << arg;
+        if (!dargs.isEmpty()
+            && !PluginPermissions::isGranted(manifest.grantedPermissions,
+                                             QStringLiteral("docker.args"))) {
+            const QString warning =
+                QStringLiteral("插件 %1 想追加 Docker 参数，但用户未授予 docker.args，已忽略")
+                    .arg(manifest.id);
+            notes << warning;
+            Logger::warn(QStringLiteral("plugin"), warning);
+        } else {
+            for (const QString &arg : dargs)
+                dockerArgs << arg;
+        }
         const QJsonObject patchEnv = outcome.patch.value(QStringLiteral("env")).toObject();
         for (auto it = patchEnv.constBegin(); it != patchEnv.constEnd(); ++it)
             env.insert(it.key(), it.value());
@@ -491,6 +596,18 @@ Result PluginRuntime::serviceStart(const QString &pluginId)
     if (manifest.id.isEmpty())
         return Result::fail(QStringLiteral("NOT_FOUND"),
                             QStringLiteral("插件 %1 未安装").arg(pluginId));
+    if (!manifest.runtimeEligible) {
+        return Result::fail(QStringLiteral("PLUGIN_API_UNSUPPORTED"),
+                            QStringLiteral("插件与当前 API 不兼容，无法启动服务"),
+                            manifest.validationErrors.join(QStringLiteral("\n")));
+    }
+    if (!PluginPermissions::isGranted(manifest.grantedPermissions,
+                                      QStringLiteral("web.service"))) {
+        return Result::fail(
+            QStringLiteral("PERMISSION_DENIED"),
+            QStringLiteral("插件 %1 没有启动本地 Web 服务的权限").arg(manifest.id),
+            QStringLiteral("请在插件管理页面授予 web.service"));
+    }
     const QString service = Json::str(manifest.web, QStringLiteral("service"));
     if (service.isEmpty())
         return Result::fail(QStringLiteral("PLUGIN_NO_SERVICE"),
@@ -522,8 +639,10 @@ Result PluginRuntime::serviceStart(const QString &pluginId)
     environment.insert(QStringLiteral("MCSM_PLUGIN_ID"), manifest.id);
     environment.insert(QStringLiteral("MCSM_PLUGIN_DIR"), manifest.path);
     environment.insert(QStringLiteral("MCSM_PLUGIN_DATA"), AppPaths::pluginDataDir(manifest.id));
-    environment.insert(QStringLiteral("MCSM_BACKEND"), QCoreApplication::applicationFilePath());
-    environment.insert(QStringLiteral("MCSM_HOME"), AppPaths::root());
+    environment.remove(QStringLiteral("MCSM_BACKEND"));
+    environment.remove(QStringLiteral("MCSM_HOME"));
+    environment.insert(QStringLiteral("MCSM_GRANTED_PERMISSIONS"),
+                       manifest.grantedPermissions.join(QLatin1Char(',')));
     environment.insert(QStringLiteral("MCSM_MANAGER_VERSION"), QCoreApplication::applicationVersion());
     if (port > 0)
         environment.insert(QStringLiteral("MCSM_PLUGIN_PORT"), QString::number(port));

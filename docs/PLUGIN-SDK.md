@@ -1,6 +1,11 @@
 # McServerManager 插件接口说明（Plugin SDK）
 
-版本：**apiVersion 1** · 适用于 McServerManager 1.2.0 及以上
+版本：**apiVersion 2** · 适用于 McServerManager 1.3.0 及以上
+
+> **破坏性升级：McServerManager 1.3.0 不再执行 API 1 管理器插件。**
+> 插件必须把 `plugin.json` 的 `apiVersion` 改为 `2`，并在 `permissions` 中按需声明能力。
+> API 2 插件安装时默认**不授予任何权限**；用户可以在安装页和「插件管理」中逐项授权或撤销。
+> 关闭权限后插件仍可能运行，但依赖该权限的功能会被拒绝，并在通知和日志中写出原因。
 
 本文档描述 McServerManager 的**插件包（plugin package）**机制：如何打包、导入、启用，以及
 前端（桌面界面）、后端（CLI 能力）、支持库 / Web 面板三类扩展分别可以调用哪些接口。
@@ -52,9 +57,12 @@ powershell -File examples\plugins\build-examples.ps1
 # 2) 预览：只校验不安装，输出识别到的作用域
 build\bin\mcsm-cli.exe plugin package inspect --zip dist\plugins\com.example.hello-panel-1.0.0.zip
 
-# 3) 安装（--force 覆盖同名插件，--disabled 安装后先不启用）
-build\bin\mcsm-cli.exe plugin package install --zip dist\plugins\com.example.hello-panel-1.0.0.zip
-build\bin\mcsm-cli.exe plugin package install --url https://example.com/my-plugin-1.0.0.zip --force
+# 3) 安装（默认零权限；--grant 只授予用户确认过的能力）
+build\bin\mcsm-cli.exe plugin package install --zip dist\plugins\com.example.hello-panel-1.0.0.zip --grant servers.read
+build\bin\mcsm-cli.exe plugin package install --url https://example.com/my-plugin-1.0.0.zip --force --grant ui.pages,servers.read
+
+# 也可以稍后修改权限；--grant "" 表示撤销全部授权
+build\bin\mcsm-cli.exe plugin package permissions --name com.example.hello-panel --grant ui.pages,servers.read
 
 # 安全：插件包 URL 必须使用 https；仅 localhost / 127.0.0.1 允许 http（本地测试）
 
@@ -83,7 +91,7 @@ my-plugin-1.0.0.zip
 +-- frontend/              前端部分（可选）
 |   +-- index.js           入口脚本，由 QJSEngine 执行
 +-- backend/               后端部分（可选）
-|   +-- index.js           入口脚本（node / python / exe / 任意可执行）
+|   +-- index.js           API 2 入口脚本（只支持 Node.js）
 +-- web/                   支持库 / Web 面板静态资源（可选）
     +-- index.html
 ```
@@ -103,14 +111,14 @@ my-plugin-1.0.0.zip
   "id": "com.example.ops-console",
   "name": "运维面板",
   "version": "1.0.0",
-  "apiVersion": 1,
-  "minManagerVersion": "1.1.1",
+  "apiVersion": 2,
+  "minManagerVersion": "1.3.0",
   "scope": "global",
   "description": "一句话说明这个插件做什么",
   "author": "你的名字",
   "homepage": "https://github.com/you/my-plugin",
   "license": "MIT",
-  "permissions": ["ui.pages", "servers.read", "network.listen"],
+  "permissions": ["ui.pages", "servers.read"],
 
   "frontend": { "entry": "frontend/index.js" },
   "backend": {
@@ -139,14 +147,14 @@ my-plugin-1.0.0.zip
 | `id` | 是 | 插件唯一标识，建议反向域名（`com.example.my-plugin`）。只允许 `A-Za-z0-9._-`，用作安装目录名 |
 | `name` | 是 | 显示名称（支持中文） |
 | `version` | 是 | 插件版本，如 `1.0.0` |
-| `apiVersion` | | **整数**接口版本（见 §4.3），必须落在管理器支持的区间内，否则拒绝加载 |
+| `apiVersion` | 是 | **整数**接口版本（见 §4.3）；1.3.0 只接受 `2` |
 | `minManagerVersion` | | 建议使用的管理器版本，**只提示用户，不参与硬校验** |
 | `scope` | | `frontend` / `backend` / `web` / `global` / `auto`（默认 `auto`，即自动识别） |
 | `description` / `author` / `homepage` / `license` | | 元信息，显示在插件列表里 |
-| `permissions` | | 插件声明的权限（见第 8 节），用于提示用户，不做强制拦截 |
+| `permissions` | | 插件声明的能力契约（见第 8 节）。未知权限会使包校验失败；未在清单中声明的权限不能授权 |
 | `frontend.entry` | | 前端入口脚本（相对插件根目录）。缺省时自动寻找 `frontend/index.js` |
 | `backend.entry` | | 后端入口（脚本或可执行文件）。缺省时自动寻找 `backend/index.js`、`backend/main.py` 等 |
-| `backend.runtime` | | `auto`（默认，按扩展名推断）/ `node` / `python` / `java` / `exec` |
+| `backend.runtime` | | API 2 必须为 `node`（或 `auto` 且入口为 `.js`）；其他运行时会被拒绝执行 |
 | `backend.args` | | 追加到入口命令后的参数数组 |
 | `backend.timeoutMs` | | 单次调用超时，默认 30000 |
 | `web.entry` | | Web 面板静态页面（相对路径），缺省时自动寻找 `web/index.html` |
@@ -171,7 +179,7 @@ my-plugin-1.0.0.zip
 | `frontend/` + `backend/` | `global`（全局） |
 | 任意两项以上 | `global` |
 
-3. 识别不出内容、入口文件不存在、或 `apiVersion` 超出支持区间：**拒绝导入**并给出具体原因。
+3. 识别不出内容、入口文件不存在、权限未知、或 `apiVersion` 超出支持区间：**拒绝导入**并给出具体原因。
 
 **只装命令行的环境**：发行包 `McServerManager-<版本>-win64-cli.zip` 里只有 `mcsm-cli.exe`，
 没有桌面界面。这类机器上 `frontend` / `web` / `global` 作用域的插件虽然也能安装、后端也能调，
@@ -184,21 +192,20 @@ my-plugin-1.0.0.zip
 
 | 常量 | 含义 |
 | --- | --- |
-| `SUPPORTED_MIN_API` | 仍然支持的最老接口级别。**只有破坏性变更时**才抬高——抬高的同时旧插件自然淘汰 |
+| `SUPPORTED_MIN_API` | 仍然支持的最老接口级别；1.3.0 为 `2` |
 | `SUPPORTED_MAX_API` | 当前级别，等于管理器的 `apiVersion` |
 
-* 插件的 `apiVersion` **不在 `[MIN, MAX]` 区间内 → 拒绝加载**，日志与界面都会写明：
-  `插件 apiVersion 2 不受支持：本管理器支持 1 - 1`。
-* 兼容写法：`apiVersion: 1`（推荐整数）。写成字符串 `"1"` 仍可加载，但会给出"请写成整数"的提示。
-* 省略 `apiVersion` 时按当前级别处理（`SUPPORTED_MAX_API`）。
+* 插件的 `apiVersion` **不在 `[MIN, MAX]` 区间内 → 拒绝执行**。API 1 包仍会显示在插件管理中，
+  以便用户升级或卸载，但状态会标记为“API 不兼容”。
+* `apiVersion` 必须写成整数 `2`。字符串 `"2"` 会给出兼容警告；省略 `apiVersion` 按 1 处理并拒绝执行。
 * `minManagerVersion` 只是给用户看的提示：管理器版本更低时给出警告，**不会**阻止插件加载。
 
 ```json
 {
   "name": "my-plugin",
   "version": "1.0.0",
-  "apiVersion": 1,
-  "minManagerVersion": "1.1.1"
+  "apiVersion": 2,
+  "minManagerVersion": "1.3.0"
 }
 ```
 
@@ -206,10 +213,10 @@ my-plugin-1.0.0.zip
 
 ```json
 {
-  "apiVersion": 1,
-  "supportedMinApi": 1,
-  "supportedMaxApi": 1,
-  "managerVersion": "1.2.0",
+  "apiVersion": 2,
+  "supportedMinApi": 2,
+  "supportedMaxApi": 2,
+  "managerVersion": "1.3.0",
   "apiVersionPolicy": {
     "type": "integer",
     "bumpOn": "每增加一批新接口 +1",
@@ -244,7 +251,7 @@ my-plugin-1.0.0.zip
 | 属性 | 说明 |
 | --- | --- |
 | `mcsm.version` | 管理器版本，如 `1.2.0` |
-| `mcsm.apiVersion` | 当前接口级别（整数，如 `1`） |
+| `mcsm.apiVersion` | 当前接口级别（整数，1.3.0 为 `2`） |
 | `mcsm.plugin.id / .name / .version / .scope / .path` | 当前插件信息 |
 
 ### 5.2 日志与通知
@@ -435,26 +442,29 @@ mcsm.include("frontend/util.js");   // 在同一个引擎里求值，可共享�
 
 因此插件与管理器彻底隔离：插件崩溃、死循环、缺少依赖都不会拖垮管理器，超时会被强制结束。
 
-| `backend.runtime` | 说明 |
+| `backend.runtime` | API 2 说明 |
 | --- | --- |
-| `node` | 需要 PATH 里有 `node`，推荐用于 JS |
-| `python` | 需要 PATH 里有 `python` / `python3` |
-| `java` | 以 `java -jar <entry>` 运行 |
-| `exec` | 直接执行入口文件（`.exe` / `.cmd` / `.bat` / `.ps1`） |
-| `auto`（默认） | 按入口扩展名推断，无法判断时按 `exec` |
+| `node` | 唯一受支持的后端运行时；需要 PATH 里有支持 `--permission` / `--allow-fs-read` / `--allow-fs-write` 的 Node.js（推荐并测试 Node 24） |
+| `auto` | 仅当入口是 `.js` 时解析为 Node.js |
+| `python` / `java` / `exec` | **拒绝执行**；这些运行时没有统一的权限边界 |
 
-缺少运行时不会被静默忽略：`plugin package info` 会显示 `launchError`，界面也会提示。
+缺少运行时或 Node.js 版本过旧时不会被静默忽略：`plugin package info` 会显示
+`launchError`，界面也会提示。CI 固定使用 Node 24，插件开发者也应以 Node 24 做权限回归。
 
-**后端进程的环境变量**：JSON-Line 后端目前**不注入**任何 `MCSM_PLUGIN_*` 环境变量（只有 `web.port` 的
-服务进程会注入，见 7.2）。需要插件 id / 安装目录 / 版本号时，请用请求 JSON 里的 `pluginsDir`、`dataDir`
-推断数据根，再读 `<插件安装目录>/plugin.json`；脚本位于 `<插件目录>/backend/`，因此
-`path.resolve(__dirname, "..") + "/plugin.json"` 也能直接拿到清单。**不要写死版本号** ——
-升级插件后后端会继续回报旧版本，导出包里记录的作者信息也会是错的。
+Node.js 后端进程由管理器附加 Node Permission Model 参数：默认只能读插件安装目录、读写自己的
+数据目录。`filesystem.server.read` / `filesystem.server.write` 才会分别开放 managed servers 目录的
+读取/写入；`process.spawn` 才会开放 `child_process`。管理器**不再**向 API 2 后端注入
+`MCSM_BACKEND` 或 `MCSM_HOME`，插件不能借环境变量直接取得管理器控制通道。
 
-> **计划中的改进**：后续管理器版本会给后端与服务的插件进程统一注入
-> `MCSM_PLUGIN_ID` / `MCSM_PLUGIN_DIR` / `MCSM_PLUGIN_DATA` / `MCSM_PLUGIN_VERSION`
-> （`VERSION` 取 `plugin.json` 的 `version`），届时插件不必再自己读清单。
-> 在那之前请写成 `process.env.MCSM_PLUGIN_VERSION || readOwnManifest().version`，两种管理器都能跑。
+可用的只读环境变量如下：
+
+| 变量 | 含义 |
+| --- | --- |
+| `MCSM_PLUGIN_ID` | 当前插件 id |
+| `MCSM_PLUGIN_DIR` | 插件安装目录 |
+| `MCSM_PLUGIN_DATA` | 插件私有数据目录 |
+| `MCSM_GRANTED_PERMISSIONS` | 本次运行已获授权限，逗号分隔 |
+| `MCSM_MANAGER_VERSION` | 管理器版本 |
 
 ### 6.2 请求与响应格式
 
@@ -462,13 +472,14 @@ mcsm.include("frontend/util.js");   // 在同一个引擎里求值，可共享�
 
 ```json
 {
-  "apiVersion": 1,
+  "apiVersion": 2,
   "plugin": "com.example.perf-tuner",
   "method": "server.beforeStart",
   "params": { "server": { "id": "survival", "memory": "16G" } },
   "caller": "mcsm-cli",
   "pluginsDir": "C:/Users/me/AppData/Local/McServerManager/plugins",
   "dataDir": "C:/Users/me/AppData/Local/McServerManager/plugins/.data/com.example.perf-tuner",
+  "permissions": ["server.start.patch"],
   "requestedAt": "2026-10-08T20:58:14"
 }
 ```
@@ -503,6 +514,8 @@ mcsm.include("frontend/util.js");   // 在同一个引擎里求值，可共享�
 * 只有带 `ok` 字段的行被当作最终结果，出现多行时最后一行生效。
 * 退出码非 0 且没有合法结果行时，管理器记录 `PLUGIN_PROTOCOL_ERROR` 并展示 stderr。
 * 超时（`backend.timeoutMs`，默认 30 秒）会得到 `PLUGIN_TIMEOUT`，进程被终止。
+* 缺少所需权限时得到 `PERMISSION_DENIED`；API 版本不兼容时得到 `PLUGIN_API_UNSUPPORTED`。
+  两种错误都会进入插件日志，并在桌面界面出现通知。
 
 ### 6.3 钩子清单
 
@@ -513,7 +526,7 @@ mcsm.include("frontend/util.js");   // 在同一个引擎里求值，可共享�
 | `plugin.install` | 插件包安装完成后 | `plugin`、`source` | `data` |
 | `plugin.enable` / `plugin.disable` | 启用 / 停用前后 | `plugin` | `data` |
 | `plugin.uninstall` | 卸载前（插件目录仍存在） | `plugin`、`purgeData` | `data` |
-| `server.beforeStart` | 每次启动服务器前 | `server`（完整记录）、`serverDir` | **`patch`**，或用 `cancel` + `reason` 阻止启动 |
+| `server.beforeStart` | 每次启动服务器前，需要 `servers.read`；返回 patch 还需要 `server.start.patch` | `server`（完整记录）、`serverDir` | **`patch`**，或用 `cancel` + `reason` 阻止启动 |
 | `server.afterStart` | 启动流程结束（成功或失败） | `server`、`ok`、`status`、`message`、`elapsedMs` | `data` |
 | `server.beforeStop` / `server.afterStop` | 停止服务器前后 | `server` | `data` |
 | `server.beforeBackup` / `server.afterBackup` | 备份前后 | `server`、`backup` | `data` |
@@ -537,6 +550,9 @@ mcsm.include("frontend/util.js");   // 在同一个引擎里求值，可共享�
 
 行为细节：
 
+* 访问任何 `server.*` 钩子都需要 `servers.read`。
+* patch 中的 `jvmArgs` / `env` 需要 `server.start.patch`；`dockerArgs` 还需要 `docker.args`。
+  未授权部分会被忽略并记录警告，不会静默生效。
 * 补丁在**每次启动前重建**；没有任何插件声明 `server.beforeStart` 时补丁文件会被删除。
 * 启动脚本里会打印 `[mcsm] plugin tuning: <插件 id>`，便于确认哪个插件生效。
 * 生成的启动脚本从不被手工修改，停用插件即可恢复原样。
@@ -582,7 +598,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 ```
 
-Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(result), flush=True)`。
+Python/Java/原生可执行后端不受 API 2 支持。需要独立能力时请拆成受权限约束的 Node.js 后端。
 
 ---
 
@@ -608,52 +624,94 @@ Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(resu
 | `MCSM_PLUGIN_DIR` | 插件安装目录 |
 | `MCSM_PLUGIN_DATA` | 插件数据目录（可写） |
 | `MCSM_PLUGIN_PORT` | 声明的端口（若 `web.port` 存在） |
-| `MCSM_BACKEND` | 当前管理器后端 `mcsm-cli` 的绝对路径，供受控命令调用 |
-| `MCSM_HOME` | 当前管理器数据目录 |
 | `MCSM_MANAGER_VERSION` | 当前管理器版本 |
 
 界面上的「打开面板」按钮会先 `service start`，再从返回的 `url` 打开浏览器；
 若插件只提供静态 `web.entry` 而没有 `service`，则直接用浏览器打开该 HTML 文件。
 
-建议服务只监听 `127.0.0.1`；需要对外访问时请做成显式配置项并在 README 里说明。
+启动服务需要 `web.service` 权限。建议服务只监听 `127.0.0.1`；需要对外访问时请做成显式配置项并在
+README 里说明，同时必须在安装页说明 `network.outbound` 的实际用途。
 
 ---
 
 ## 8. 权限、安全与隔离
 
-插件是**受信任扩展**，不是沙箱。安装第三方插件前请确认来源。
+API 2 把 `permissions` 当作**声明即契约**：清单中声明的能力可以被用户授权，未声明的能力永远不能被
+授权。新安装默认授予零项权限；用户必须逐项确认。插件升级后若声明了新的敏感权限，重新导入页会把
+它们标为“新增权限”，默认不勾选。
 
-> **重要：安装插件等于授予其完整本机权限。** `permissions` 只用于向用户说明插件能力，
-> 当前版本不会据此限制文件、进程、网络或其他系统访问。
-> 插件钩子中的服务器对象不包含 RCON 密码；需要执行控制台命令时，请通过
-> `MCSM_BACKEND --home <MCSM_HOME> server command --id ... --command ...`
-> 使用受控通道。
+### 8.1 权限目录
 
-| `permissions` 建议值 | 含义 |
+| 权限 | 风险 | 控制的能力 |
+| --- | --- | --- |
+| `ui.pages` | low | 注册页面、按钮、通知，更新该插件自己的页面 |
+| `settings.read` | medium | 读取不在该插件私有命名空间内的管理器设置 |
+| `servers.read` | medium | 服务器列表、详情、状态、日志、配置、备份列表与 `server.*` 钩子 |
+| `servers.control` | high | 启动、停止、重启、强制结束服务器 |
+| `console.send` | high | 通过 RCON 向服务器控制台发命令 |
+| `server.delete` | critical | 永久删除服务器记录和目录 |
+| `config.write` | high | 应用或回滚服务器配置 |
+| `backup.manage` | high | 创建、恢复、删除、安排备份 |
+| `server.start.patch` | high | 生命周期钩子修改 JVM 参数或容器环境 |
+| `filesystem.server.read` | high | 读取 managed servers 目录 |
+| `filesystem.server.write` | critical | 写入 managed servers 目录 |
+| `process.spawn` | critical | 从后端启动其它进程 |
+| `network.outbound` | high | 访问外部网络；当前版本只作声明提示，见下方限制 |
+| `docker.args` | critical | 给 Docker 启动命令追加经过管理器检查的参数 |
+| `web.service` | high | 启动插件声明的本地 Web 服务 |
+| `filesystem.data` | low | 旧名称；插件私有数据目录无需申请，使用时会提示迁移 |
+
+未知权限、重复权限或未声明却被授予的权限都会导致操作失败。权限 ID 不区分大小写，存储时统一为小写、
+去重并排序。
+
+### 8.2 权限在何处强制执行
+
+| 层 | 强制执行 |
 | --- | --- |
-| `ui.pages` | 注册界面页面 |
-| `servers.read` | 读取服务器列表 / 状态 |
-| `servers.control` | 启停服务器、发送指令 |
-| `config.write` | 写入 `server.properties` |
-| `filesystem.data` | 读写插件数据目录 |
-| `network.listen` | 对外开放本地端口（Web 面板） |
-| `network.outbound` | 访问外网 |
+| 安装/升级 | 清单权限必须全部存在；授予集合必须来自清单；API 1 包不可执行 |
+| 前端 `mcsm.api` | 页面、设置、服务器读取按权限返回或拒绝；`mcsm.backend.invoke()` 只允许调用自己的后端和已授权命令 |
+| 后端进程 | 默认文件访问仅限插件目录与私有数据；服务器目录写入、子进程启动按权限追加 Node 参数 |
+| 生命周期钩子 | `server.*` 需要 `servers.read`；启动补丁和 Docker 参数分别检查专属权限 |
+| 权限变更 | 插件管理中保存后立即更新注册表；重新加载插件页面时使用新的授权集合 |
 
-管理器侧的保护措施：
+权限拒绝统一返回 `PERMISSION_DENIED`，同时写入插件日志并产生桌面通知。例如：
 
-1. 前端脚本运行在 QJSEngine 中，只能通过 `mcsm.*` 暴露的接口访问能力（没有文件系统 / 进程 API）。
-2. 后端插件在独立进程里运行并有超时保护；失败只变成 `warnings`，不会中断服务器管理流程。
-3. 导入前必须先通过 `plugin package inspect`：id 合法性、`apiVersion`、入口文件存在性都会被校验。
-4. 插件只能写入自己的安装目录与 `.data/<id>` 数据目录。
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "PERMISSION_DENIED",
+    "message": "权限不足：servers.control",
+    "detail": "所需权限：servers.control；请在插件管理页面授权"
+  }
+}
+```
 
-### 8.1 安装位置：只在管理器目录内
+用户关闭某项权限后，插件不会自动卸载或停用；这是有意设计，便于用户只关闭高风险能力并继续使用
+其余功能。插件应处理这种失败并在自己的页面展示可操作的提示，而不是假定权限永远存在。
+
+### 8.3 隔离边界与残余风险
+
+管理器使用 Node Permission Model、独立子进程、超时限制、受限环境变量和前端 QJSEngine 白名单降低
+插件越权风险，但**这不是防恶意代码的操作系统级沙箱**：
+
+* Node Permission Model 是纵深防御，不是对恶意代码的绝对保证；
+* 当前 Node 版本不能通过该模型限制所有网络访问，`network.outbound` 仍主要依靠用户信任和审计；
+* Windows 下未使用 AppContainer/受限令牌，插件进程仍与当前 Windows 用户共享基础身份；
+* Web 服务运行在浏览器中，浏览器自身不能继承 QJSEngine 的能力限制。
+
+因此界面会区分“本地 zip / URL 来源”并展示每一项能力，但用户仍只应安装可信来源的插件。需要
+强隔离的不可信代码应放到单独的系统账户、虚拟机或容器中运行。API 2 会拒绝 Python、Java 和原生
+可执行后端，正是因为它们无法获得与 Node.js 一致的第一方权限检查。
+
+### 8.4 安装位置：只在管理器目录内
 
 * 插件**只能**安装到 `<数据目录>/plugins/<插件 id>/`（Windows 默认
   `%LOCALAPPDATA%\McServerManager\plugins`）。安装前会校验目标目录确实位于该根目录之内，
   越界直接拒绝（`UNSAFE_PLUGIN_PATH`）——恶意插件无法把文件写到系统目录或别处。
 * 插件 id 只允许 `A-Za-z0-9._-`，不能包含路径分隔符，所以无法用 `../` 之类的方式跳出插件目录。
 
-### 8.2 压缩包与入口路径校验
+### 8.5 压缩包与入口路径校验
 
 | 检查项 | 行为 |
 | --- | --- |
@@ -665,13 +723,13 @@ Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(resu
 | `frontend` / `backend` / `web` 入口、`web.service` | 必须是包内相对路径，绝对路径或 `..` 直接拒绝 |
 | 后端入口、`include()` 的真实路径 | 必须位于该插件目录内（符号链接会被展开检查） |
 
-### 8.3 运行期隔离（一条卡住不会拖死全部）
+### 8.6 运行期隔离（一条卡住不会拖死全部）
 
 | 机制 | 说明 |
 | --- | --- |
 | 前端脚本预算 | 加载 2500ms、单次事件 1000ms；超时会被强制中断 |
 | 前端脚本失控 | 连续超预算的插件在**本次会话内停用**（不再接收事件），插件扩展页会给出提示 |
-| 后端插件 | 独立进程 + 超时保护；失败只变成 `warnings`，不影响其它操作 |
+| 后端插件 | 独立 Node 进程 + Permission Model + 超时保护；失败只变成 `warnings`，不影响其它操作 |
 | 界面线程 | 后端调用全部异步且带看门狗；插件拿到的服务器列表是缓存快照，不会同步等待后端 |
 | 定时备份守护进程 | 启动时带 `--parent-pid`，管理器被强杀后守护进程自动退出，不留孤儿进程 |
 
@@ -681,6 +739,8 @@ Python 版同理：读 `sys.stdin` 一行、解析 JSON、`print(json.dumps(resu
 
 * `apiVersion` 是整数区间校验（见 §4.3）：只增加新接口时抬 `SUPPORTED_MAX_API`；
   破坏性变更时抬 `SUPPORTED_MIN_API`，旧插件被明确拒绝而不是行为异常。
+* **1.3.0 是破坏性升级**：支持区间从 `1..1` 变为 `2..2`。API 1 插件不会执行，需迁移权限、
+  显式写 `apiVersion: 2`，并确认后端只使用 Node.js。
 * 管理器新增能力时只增加字段、不删除旧字段；插件应当忽略不认识的键。
 * 本版（1.2.0）新增的交互能力：`table` 的 `selectable`/`key`/`rowIds`/`selected`、
   `buttons` 的 `action` 与 `pick`、`mcsm.ui.onAction()`、`ui.selection` 事件（见 §5.3.1）。
@@ -694,10 +754,10 @@ mcsm-cli plugin api --pretty
 
 ```json
 {
-  "apiVersion": 1,
-  "supportedMinApi": 1,
-  "supportedMaxApi": 1,
-  "managerVersion": "1.2.0",
+  "apiVersion": 2,
+  "supportedMinApi": 2,
+  "supportedMaxApi": 2,
+  "managerVersion": "1.3.0",
   "apiVersionPolicy": {
     "type": "integer",
     "bumpOn": "每增加一批新接口 +1",
@@ -709,14 +769,15 @@ mcsm-cli plugin api --pretty
     "layout": ["plugin.json", "frontend/index.js", "backend/index.js", "web/index.html", "README.md"],
     "requiredFields": ["id", "name", "version"],
     "apiVersionType": "整数，每增加一批新接口 +1",
-    "supportedApiRange": "1-1"
+    "supportedApiRange": "2-2"
   },
   "security": {
     "installRoot": "C:/Users/<you>/AppData/Local/McServerManager/plugins",
     "installRootPolicy": "插件只能安装在管理器数据目录的 plugins/ 下",
     "archiveRules": ["禁止绝对路径 / 盘符 / UNC", "禁止 .. 跳出解压目录", "禁止符号链接",
                      "解压后逐个校验落盘路径仍在插件目录内"],
-    "entryRules": "frontend/backend/web 入口必须是包内相对路径"
+    "entryRules": "frontend/backend/web 入口必须是包内相对路径",
+    "permissionPolicy": "默认零授权；清单声明是授权上限；拒绝写入插件日志并通知用户"
   },
   "scopes": { "frontend": "只扩展桌面界面", "backend": "只扩展后端", "web": "支持库 / Web 面板",
               "global": "同时包含前端与后端内容", "auto": "按目录结构自动识别" },
@@ -751,13 +812,16 @@ mcsm-cli plugin api --pretty
   },
   "backend": {
     "protocol": "JSON lines over stdin/stdout",
-    "runtimes": ["node", "python", "exec", "auto"],
+    "runtimes": ["node", "auto"],
     "hooks": ["plugin.install", "plugin.enable", "plugin.disable", "plugin.uninstall",
               "server.beforeStart", "server.afterStart", "server.beforeStop", "server.afterStop",
               "server.beforeBackup", "server.afterBackup", "server.configApplied", "scheduler.tick"],
     "startPatchKeys": ["jvmArgs", "env", "dockerArgs", "note", "cancel", "reason"]
   },
-  "cli": { "install": "mcsm-cli plugin package install --zip <file>|--url <url> [--force]" },
+  "cli": {
+    "install": "mcsm-cli plugin package install --zip <file>|--url <url> [--grant <ids>|--grant-all]",
+    "permissions": "mcsm-cli plugin package permissions --name <id> --grant <ids>"
+  },
   "pluginsDir": "C:/Users/<you>/AppData/Local/McServerManager/plugins"
 }
 ```
@@ -783,11 +847,12 @@ mcsm-cli plugin api --pretty
 | 命令 | 说明 |
 | --- | --- |
 | `plugin packages [--enabled]` | 列出插件包（可只列已启用） |
-| `plugin package install --zip <file> [--force] [--disabled] [--expect <id>]` | 从本地 zip 安装 |
-| `plugin package install --url <url> [--force]` | 从 URL 安装 |
+| `plugin package install --zip <file> [--force] [--disabled] [--expect <id>] [--grant <ids>|--grant-all]` | 从本地 zip 安装并授权 |
+| `plugin package install --url <url> [--force] [--grant <ids>|--grant-all]` | 从 URL 安装并授权 |
 | `plugin package inspect --zip <file>` / `--url <url>` | 只校验并输出识别结果 |
 | `plugin package list` / `plugin package info --name <id>` | 列表 / 详情（含启动命令与服务状态） |
 | `plugin package enable` / `disable --name <id>` | 启用 / 停用（触发对应钩子） |
+| `plugin package permissions --name <id> [--grant <ids>]` | 查看或修改已授权限；空值撤销全部 |
 | `plugin package remove --name <id> [--purge-data]` | 卸载（触发 `plugin.uninstall`） |
 | `plugin call --name <id> --method <m> [--params '{...}'] [--timeout ms]` | 调用后端方法 |
 | `plugin hook --name <id>` / `--all --hook <h> [--payload '{...}']` | 手动触发钩子 |

@@ -2,13 +2,16 @@
 
 #include <QDialog>
 #include <QJsonObject>
+#include <QVector>
 
 #include "widgets/Common.h"
 
 class QLabel;
+class QCheckBox;
 class QLineEdit;
 class QPlainTextEdit;
 class QStackedWidget;
+class QVBoxLayout;
 
 namespace mcsm {
 
@@ -39,6 +42,8 @@ private:
     void startImport();
     void inspect();
     void install();
+    void showPermissionChoices(const QJsonObject &pluginData);
+    void setPermissionButtonsEnabled(bool enabled);
     void setBusy(bool busy, const QString &status);
     QString sourceArgument() const;
     bool isUrlMode() const;
@@ -54,11 +59,16 @@ private:
     QLabel *m_status = nullptr;
     QLabel *m_scope = nullptr;
     QPlainTextEdit *m_details = nullptr;
+    QWidget *m_permissionPane = nullptr;
+    QVBoxLayout *m_permissionLayout = nullptr;
+    QVector<QCheckBox *> m_permissionChecks;
     GradientButton *m_importButton = nullptr;
     GradientButton *m_closeButton = nullptr;
 
     bool m_busy = false;
     bool m_installed = false;
+    bool m_inspected = false;
+    QString m_inspectedSource;
 };
 
 } // namespace mcsm

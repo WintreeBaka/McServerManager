@@ -30,6 +30,10 @@ struct PluginManifest
     QString homepage;
     QString license;
     QStringList permissions;
+    /// Permissions the local user approved. Never inferred from the manifest:
+    /// a plugin update that adds capabilities keeps them ungranted until the
+    /// user explicitly confirms the new set.
+    QStringList grantedPermissions;
     QStringList hooks;
     PluginScope scope = PluginScope::Unknown;
     QString scopeToken;                 // frontend | backend | web | global | auto
@@ -47,6 +51,8 @@ struct PluginManifest
     QString installedAt;
     QString source;                     // "zip" | "url" | "manual"
     QString sourceUrl;
+    QStringList validationErrors;
+    bool runtimeEligible = true;
 
     bool hasFrontend() const { return parts.contains(QStringLiteral("frontend")); }
     bool hasBackend() const { return parts.contains(QStringLiteral("backend")); }
@@ -71,6 +77,9 @@ struct PluginInstallRequest
     QString expectId;            // optional: refuse to install a different id
     bool force = false;          // overwrite an existing install
     bool enable = true;
+    QStringList grantedPermissions;
+    bool grantSpecified = false;
+    bool grantAll = false;
 };
 
 struct PluginValidation
@@ -112,6 +121,9 @@ public:
     static Result install(const PluginInstallRequest &request);
     static Result remove(const QString &id, bool purgeData = false);
     static Result setEnabled(const QString &id, bool enabled);
+    /// Replaces the user-approved subset of the manifest's declared
+    /// permissions. Unknown or undeclared capabilities are rejected.
+    static Result setPermissions(const QString &id, const QStringList &granted);
 
     /// Machine readable description of the whole plugin API. Backs
     /// `mcsm-cli plugin api` so tooling and the docs stay in sync.

@@ -2,6 +2,7 @@
 
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QCheckBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -9,6 +10,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSet>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
@@ -36,8 +38,8 @@ PluginImportDialog::PluginImportDialog(QWidget *parent)
     root->addWidget(buildSourcePane());
 
     auto *permissionNotice = makeLabel(
-        QStringLiteral("⚠ 安全提示：安装插件等于授予其完整本机权限。plugin.json 中的 permissions "
-                       "仅用于说明，不会限制插件实际能力。"),
+        QStringLiteral("⚠ 破坏性升级：API 2 插件默认没有任何权限。安装后请逐项授权；"
+                       "关闭权限时插件仍可运行，但对应功能会失败，错误会写入通知和日志。"),
         QStringLiteral("hint"), this);
     permissionNotice->setWordWrap(true);
     permissionNotice->setStyleSheet(QStringLiteral("font-weight: 600;"));
@@ -163,6 +165,39 @@ QWidget *PluginImportDialog::buildResultPane()
     m_details->setMinimumHeight(160);
     m_details->setFrameShape(QFrame::NoFrame);
     layout->addWidget(m_details, 1);
+
+    m_permissionPane = new QWidget(card);
+    auto *permissionOuter = new QVBoxLayout(m_permissionPane);
+    permissionOuter->setContentsMargins(0, 4, 0, 0);
+    permissionOuter->setSpacing(8);
+    permissionOuter->addWidget(makeLabel(
+        QStringLiteral("权限授权（默认全部关闭）"),
+        QStringLiteral("subtitle"), m_permissionPane));
+    auto *selectionRow = new QHBoxLayout();
+    auto *selectAll = new GradientButton(QStringLiteral("全选"), m_permissionPane);
+    selectAll->setStyle(GradientButton::Outline);
+    selectAll->setCompact(true);
+    auto *selectNone = new GradientButton(QStringLiteral("全不选"), m_permissionPane);
+    selectNone->setStyle(GradientButton::Outline);
+    selectNone->setCompact(true);
+    selectionRow->addWidget(selectAll);
+    selectionRow->addWidget(selectNone);
+    selectionRow->addStretch(1);
+    permissionOuter->addLayout(selectionRow);
+    m_permissionLayout = new QVBoxLayout();
+    m_permissionLayout->setContentsMargins(0, 0, 0, 0);
+    m_permissionLayout->setSpacing(6);
+    permissionOuter->addLayout(m_permissionLayout);
+    connect(selectAll, &QPushButton::clicked, this, [this]() {
+        for (QCheckBox *check : m_permissionChecks)
+            check->setChecked(true);
+    });
+    connect(selectNone, &QPushButton::clicked, this, [this]() {
+        for (QCheckBox *check : m_permissionChecks)
+            check->setChecked(false);
+    });
+    m_permissionPane->hide();
+    layout->addWidget(m_permissionPane);
     return card;
 }
 
@@ -188,7 +223,10 @@ void PluginImportDialog::setBusy(bool busy, const QString &status)
 {
     m_busy = busy;
     m_importButton->setEnabled(!busy);
-    m_importButton->setText(busy ? QStringLiteral("处理中…") : QStringLiteral("校验并导入"));
+    m_importButton->setText(
+        busy ? QStringLiteral("处理中…")
+             : (m_inspected ? QStringLiteral("确认安装并应用权限")
+                            : QStringLiteral("校验并导入")));
     if (!status.isEmpty())
         m_status->setText(status);
 }
@@ -211,7 +249,19 @@ void PluginImportDialog::startImport()
         m_status->setText(QStringLiteral("找不到该文件：%1").arg(source));
         return;
     }
+    if (m_inspected && source == m_inspectedSource) {
+        install();
+        return;
+    }
+    m_inspected = false;
+    m_inspectedSource.clear();
     inspect();
+}
+
+void PluginImportDialog::setPermissionButtonsEnabled(bool enabled)
+{
+    for (QCheckBox *check : m_permissionChecks)
+        check->setEnabled(enabled);
 }
 
 void PluginImportDialog::inspect()
@@ -226,6 +276,8 @@ void PluginImportDialog::inspect()
         arguments, this, [this](const Reply &reply) {
             const QJsonObject pluginData = reply.data;
             if (!reply.ok) {
+                m_inspected = false;
+                m_permissionPane->hide();
                 setBusy(false, QStringLiteral("校验未通过：%1").arg(reply.message.isEmpty()
                                                                        ? reply.errorText()
                                                                        : reply.message));
@@ -258,11 +310,61 @@ void PluginImportDialog::inspect()
                                       already ? QStringLiteral("（已安装，覆盖需打开下方开关）")
                                               : QString()));
             if (already && !m_force->isChecked()) {
+                m_inspected = false;
                 setBusy(false, QStringLiteral("该插件已安装，如需重新导入请打开「覆盖」开关"));
                 return;
             }
-            install();
+            showPermissionChoices(pluginData);
+            m_inspected = true;
+            m_inspectedSource = sourceArgument();
+            m_importButton->setText(QStringLiteral("确认安装并应用权限"));
+            setBusy(false, QStringLiteral("请确认权限后再次点击安装"));
         });
+}
+
+void PluginImportDialog::showPermissionChoices(const QJsonObject &pluginData)
+{
+    while (QLayoutItem *item = m_permissionLayout->takeAt(0)) {
+        if (QWidget *widget = item->widget())
+            widget->deleteLater();
+        delete item;
+    }
+    m_permissionChecks.clear();
+
+    QSet<QString> current;
+    for (const QJsonValue &value :
+         pluginData.value(QStringLiteral("currentGrantedPermissions")).toArray())
+        current.insert(value.toString());
+    QSet<QString> added;
+    for (const QJsonValue &value :
+         pluginData.value(QStringLiteral("newPermissions")).toArray())
+        added.insert(value.toString());
+
+    for (const QJsonValue &value :
+         pluginData.value(QStringLiteral("permissionDetails")).toArray()) {
+        const QJsonObject detail = value.toObject();
+        const QString id = detail.value(QStringLiteral("id")).toString();
+        if (id.isEmpty())
+            continue;
+        auto *check = new QCheckBox(
+            QStringLiteral("%1 (%2) · %3%4")
+                .arg(detail.value(QStringLiteral("label")).toString(id), id,
+                     detail.value(QStringLiteral("risk")).toString(),
+                     added.contains(id) ? QStringLiteral(" · 新增权限") : QString()),
+            m_permissionPane);
+        check->setToolTip(detail.value(QStringLiteral("description")).toString());
+        check->setProperty("permissionId", id);
+        check->setChecked(current.contains(id));
+        if (detail.value(QStringLiteral("sensitive")).toBool())
+            check->setStyleSheet(QStringLiteral("font-weight: 600;"));
+        m_permissionLayout->addWidget(check);
+        m_permissionChecks.append(check);
+    }
+    if (m_permissionChecks.isEmpty())
+        m_permissionLayout->addWidget(makeLabel(
+            QStringLiteral("该插件没有声明任何能力。"), QStringLiteral("hint"),
+            m_permissionPane));
+    m_permissionPane->show();
 }
 
 void PluginImportDialog::install()
@@ -275,6 +377,12 @@ void PluginImportDialog::install()
         arguments << QStringLiteral("--force");
     if (!m_enable->isChecked())
         arguments << QStringLiteral("--disabled");
+    QStringList grants;
+    for (QCheckBox *check : m_permissionChecks) {
+        if (check->isChecked())
+            grants << check->property("permissionId").toString();
+    }
+    arguments << QStringLiteral("--grant") << grants.join(QLatin1Char(','));
     const QString expected = m_expectedId->text().trimmed();
     if (!expected.isEmpty())
         arguments << QStringLiteral("--expect") << expected;

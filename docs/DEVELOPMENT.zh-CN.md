@@ -40,7 +40,7 @@ Windows 推荐使用 Qt Online Installer 安装 `mingw_64` 套件，并同时安
 ### 按开发内容可选
 
 - Docker Desktop：涉及容器启动、日志、备份和镜像操作的端到端测试
-- Node.js：运行官方插件的后端脚本和 `node --check` 语法检查
+- Node.js 24：运行 API 2 插件后端、Node Permission Model 权限测试和 `node --check` 语法检查
 - Python 3：静态检查、上游 API 探针和 RCON 调试工具
 - PowerShell 7 或 Windows PowerShell 5.1：Windows 构建、冒烟测试与发布脚本
 
@@ -204,7 +204,7 @@ node --check plugins\official\player-admin\backend\lib\mcsm.js
 
 ```powershell
 .\build\bin\mcsm-cli.exe --home $devHome plugin package inspect --zip .\dist\plugins\<plugin>.zip
-.\build\bin\mcsm-cli.exe --home $devHome plugin package install --zip .\dist\plugins\<plugin>.zip
+.\build\bin\mcsm-cli.exe --home $devHome plugin package install --zip .\dist\plugins\<plugin>.zip --grant ui.pages,servers.read
 .\build\bin\mcsm-cli.exe --home $devHome plugin call --name <plugin-id> --method <method>
 ```
 
@@ -270,13 +270,23 @@ python tools\check-endpoints.py
 关键规则：
 
 - 插件包只能把文件放在管理器数据目录内，拒绝绝对路径、`..`、符号链接和硬链接越界。
+- 1.3.0 起插件必须声明 `apiVersion: 2`，API 1 包只在管理页显示但不能执行。后端只支持
+  Node.js，且安装时默认零权限；开发和测试时显式传入 `--grant`，不要使用 `--grant-all`
+  掩盖缺失的权限边界。
+- `permissions` 是声明即契约：清单中没有的权限不能授权；新增权限在升级时默认不勾选。权限被
+  撤销后，插件必须处理 `PERMISSION_DENIED`，并通过通知和日志让用户知道哪个功能失效。
 - 前端插件运行在 `QJSEngine` 中，没有原生文件或进程能力，只能调用 `mcsm.*`。
-- 后端插件是独立进程，一行 JSON 请求、一行 JSON 响应；单行输入有大小上限。
+- 后端插件是独立 Node.js 进程，一行 JSON 请求、一行 JSON 响应；单行输入有大小上限。
+  默认只能读写插件目录与私有数据，服务器目录和子进程能力必须逐项授权。
 - 插件不得直接写 `servers.json`。需要注册服务器时调用受控的
   `mcsm-cli server register --file <record.json>`，由管理器完成校验与事务写入。
 - 插件只能访问自身数据目录；涉及服务器目录时必须验证真实路径位于 `<root>/servers` 下。
 - 在线模式下不得猜测离线 UUID；RCON 不可用时不要直接改玩家文件。
 - 修改协议或 `mcsm.*` API 时同步更新 SDK、示例、版本兼容说明和插件冒烟测试。
+
+测试插件权限时至少覆盖：零权限安装、逐项授权、撤销权限、升级新增权限默认关闭、未知/未声明
+权限拒绝、API 1 阻止执行、未授权的服务器目录读取和 `child_process` 访问失败，以及拒绝信息同时
+出现在后端日志和界面通知中。详细说明见 `docs/PLUGIN-SDK.md` 第 8 节。
 
 ### 7.5 修改进程或容器生命周期
 
@@ -368,7 +378,7 @@ python tools\static_check.py
 .\tools\smoke-test.ps1 -Exe .\build\bin\mcsm-cli.exe
 ```
 
-## 11. 构建与发布 1.2.x 发行包
+## 11. 构建与发布发行包
 
 发行版本以 CMake `project(VERSION)` 为准。发布前确认 `CHANGELOG.md` 和
 `docs/RELEASE_NOTES-<Version>.md` 已更新。

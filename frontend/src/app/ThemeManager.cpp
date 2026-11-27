@@ -363,7 +363,11 @@ QCheckBox::indicator {
     border: 1px solid %BORDER_STRONG%;
     background: %SURFACE_ALT%;
 }
-QCheckBox::indicator:checked { background: %ACCENT%; border: none; }
+QCheckBox::indicator:checked {
+    background-color: %ACCENT%;
+    border: 1px solid %PINK%;
+}
+QCheckBox::indicator:checked:hover { background-color: %PINK%; }
 
 QSlider::groove:horizontal {
     height: 6px; border-radius: 3px; background: %BORDER%;
