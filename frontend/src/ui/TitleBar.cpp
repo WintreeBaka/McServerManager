@@ -113,11 +113,7 @@ void TitleBar::applyTheme()
 {
     const Palette &palette = ThemeManager::instance()->palette();
     const QPair<QColor, QColor> logoColors = ThemeManager::accentColors(palette);
-    const QString logoBackground =
-        ThemeManager::isFlat()
-            ? logoColors.first.name()
-            : QStringLiteral("qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:1 %2)")
-                  .arg(logoColors.first.name(), logoColors.second.name());
+    const QString logoBackground = logoColors.first.name();
     m_logo->setStyleSheet(QStringLiteral("border-radius: 10px; font-size: 16px; color: #2A2333;"
                                          "background: %1;")
                               .arg(logoBackground));

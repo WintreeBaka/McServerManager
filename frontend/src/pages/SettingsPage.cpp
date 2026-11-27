@@ -12,6 +12,7 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QSlider>
 #include <QStackedWidget>
 #include <QTimer>
@@ -93,7 +94,7 @@ SettingsPage::SettingsPage(QWidget *parent)
         m_syncingAppearance = true;
         m_themeSwitch->setCurrentIndex(ThemeManager::instance()->isDark() ? 0 : 1, false);
         m_accentSwitch->setCurrentIndex(
-            ThemeManager::instance()->accentStyle() == ThemeManager::AccentStyle::Flat ? 1 : 0, false);
+            ThemeManager::instance()->accentStyle() == ThemeManager::AccentStyle::Blue ? 1 : 0, false);
         m_syncingAppearance = false;
     });
     connect(context, &AppContext::experimentalChanged, this, [this](bool) {
@@ -124,6 +125,8 @@ QWidget *SettingsPage::buildNavCard()
         auto *button = new GradientButton(labels.at(i), card);
         button->setStyle(GradientButton::Outline);
         button->setCompact(true);
+        button->setFixedHeight(32);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         connect(button, &QPushButton::clicked, this, [this, i]() { setSection(i); });
         layout->addWidget(button);
         m_navButtons.append(button);
@@ -187,8 +190,14 @@ void SettingsPage::setSection(int index)
 void SettingsPage::updateNavState()
 {
     const bool experimental = AppContext::instance()->experimentalEnabled();
-    if (m_navButtons.size() > 3)
-        m_navButtons.at(3)->setVisible(experimental);
+    if (m_navButtons.size() > 3) {
+        // Keep the row in the layout even when unavailable. Hiding it made every
+        // control below jump whenever the experimental switch changed.
+        m_navButtons.at(3)->setVisible(true);
+        m_navButtons.at(3)->setEnabled(experimental);
+        m_navButtons.at(3)->setToolTip(
+            experimental ? QString() : QStringLiteral("请先在当前页面开启实验性功能"));
+    }
     for (int i = 0; i < m_navButtons.size(); ++i) {
         const bool active = i == m_section;
         m_navButtons.at(i)->setStyle(active ? GradientButton::Primary : GradientButton::Outline);
@@ -370,7 +379,7 @@ QWidget *SettingsPage::buildAppearanceCard()
     auto *card = new CardFrame(this);
     auto *layout = CardFrame::verticalLayout(card, 20, 14);
     layout->addWidget(makeSectionHeader(QStringLiteral("外观"),
-                                        QStringLiteral("马卡龙粉 - 蓝配色，渐变/纯色与字体都可自由切换"), nullptr,
+                                        QStringLiteral("暗黑 / 亮色主题、粉色 / 蓝色配色与字体都可自由切换"), nullptr,
                                         card));
 
     auto *row = new QHBoxLayout();
@@ -390,12 +399,12 @@ QWidget *SettingsPage::buildAppearanceCard()
     accentColumn->setSpacing(6);
     accentColumn->addWidget(makeLabel(QStringLiteral("色彩风格"), QStringLiteral("caption"), card));
     m_accentSwitch = new SegmentedControl(card);
-    m_accentSwitch->setItems({QStringLiteral("渐变"), QStringLiteral("纯色简洁")});
+    m_accentSwitch->setItems({QStringLiteral("粉色"), QStringLiteral("蓝色")});
     m_accentSwitch->setCurrentIndex(
-        ThemeManager::instance()->accentStyle() == ThemeManager::AccentStyle::Flat ? 1 : 0, false);
+        ThemeManager::instance()->accentStyle() == ThemeManager::AccentStyle::Blue ? 1 : 0, false);
     accentColumn->addWidget(m_accentSwitch);
-    accentColumn->addWidget(makeLabel(QStringLiteral("纯色=保留同样的颜色但去掉渐变"), QStringLiteral("hint"),
-                                      card));
+    accentColumn->addWidget(makeLabel(QStringLiteral("粉色沿用原纯色风格；蓝色为新增配色"),
+                                      QStringLiteral("hint"), card));
     accentColumn->addStretch(1);
     row->addLayout(accentColumn, 3);
     layout->addLayout(row);
@@ -464,11 +473,11 @@ QWidget *SettingsPage::buildAppearanceCard()
     connect(m_accentSwitch, &SegmentedControl::currentChanged, this, [this](int index) {
         if (m_syncingAppearance)
             return;
-        AppContext::instance()->setAccentStyle(index == 1 ? ThemeManager::AccentStyle::Flat
-                                                          : ThemeManager::AccentStyle::Gradient);
+        AppContext::instance()->setAccentStyle(index == 1 ? ThemeManager::AccentStyle::Blue
+                                                          : ThemeManager::AccentStyle::Pink);
         AppContext::instance()->logActivity(
-            QStringLiteral("色彩风格已切换为%1").arg(index == 1 ? QStringLiteral("纯色")
-                                                              : QStringLiteral("渐变")),
+            QStringLiteral("色彩风格已切换为%1").arg(index == 1 ? QStringLiteral("蓝色")
+                                                              : QStringLiteral("粉色")),
             QStringLiteral("info"));
     });
     connect(m_fontPreset, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
@@ -742,7 +751,7 @@ void SettingsPage::detectEnvironment()
 {
     // AppContext emits environmentChanged once the shared request finishes.
     // Applying the cached value here as well caused duplicate same-frame redraws.
-    AppContext::instance()->refreshEnvironment();
+    AppContext::instance()->refreshEnvironment(true);
 }
 
 void SettingsPage::applyDoctor(const QJsonObject &doctor)
@@ -793,7 +802,7 @@ void SettingsPage::onActivated()
     m_syncingAppearance = true;
     m_themeSwitch->setCurrentIndex(ThemeManager::instance()->isDark() ? 0 : 1, false);
     m_accentSwitch->setCurrentIndex(
-        ThemeManager::instance()->accentStyle() == ThemeManager::AccentStyle::Flat ? 1 : 0, false);
+        ThemeManager::instance()->accentStyle() == ThemeManager::AccentStyle::Blue ? 1 : 0, false);
     m_syncingAppearance = false;
     m_animations->setChecked(AppContext::instance()->animationsEnabled());
     m_speed->setValue(int(AppContext::instance()->animationScale() * 100));

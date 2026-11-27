@@ -78,7 +78,7 @@ public:
     /// Re-runs `mcsm-cli doctor` and broadcasts the result. Called periodically
     /// and by every "refresh" action, so the title bar follows Docker being
     /// started or stopped while the app is already running.
-    void refreshEnvironment();
+    void refreshEnvironment(bool force = false);
     QJsonObject environment() const { return m_environment; }
 
     /// Rate limiter for "refresh when this page becomes visible" work. Returns

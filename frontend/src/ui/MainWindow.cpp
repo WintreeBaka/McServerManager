@@ -153,6 +153,11 @@ void MainWindow::buildUi()
     }
     connect(m_titleBar, &TitleBar::themeToggleRequested, this, []() {
         ThemeManager::instance()->toggle();
+        AppContext::instance()->logActivity(
+            QStringLiteral("已切换到%1").arg(ThemeManager::instance()->isDark()
+                                                  ? QStringLiteral("暗黑主题")
+                                                  : QStringLiteral("亮色主题")),
+            QStringLiteral("info"));
     });
     connect(m_titleBar, &TitleBar::settingsRequested, this, [this]() { navigateTo(Settings); });
 
@@ -381,26 +386,6 @@ void MainWindow::renderBackground()
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.fillRect(rect(), ThemeManager::windowGradient(palette, QRectF(0, 0, width(), height())));
-
-    // Decorative glows only in the light gradient theme: dark mode stays neutral
-    // and the flat style stays plain.
-    if (ThemeManager::instance()->accentStyle() == ThemeManager::AccentStyle::Flat || palette.dark)
-    {
-        painter.end();
-        m_background = pixmap;
-        return;
-    }
-
-    QColor softPink = palette.pink;
-    softPink.setAlphaF(palette.dark ? 0.10 : 0.16);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(softPink);
-    painter.drawEllipse(QPointF(width() * 0.16, height() * 0.06), width() * 0.26, height() * 0.24);
-
-    QColor softBlue = palette.blue;
-    softBlue.setAlphaF(palette.dark ? 0.09 : 0.14);
-    painter.setBrush(softBlue);
-    painter.drawEllipse(QPointF(width() * 0.92, height() * 0.94), width() * 0.30, height() * 0.26);
     painter.end();
     m_background = pixmap;
 }

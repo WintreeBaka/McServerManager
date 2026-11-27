@@ -85,6 +85,11 @@ foreach ($extra in @("README.md", $quickstart, "THIRD_PARTY_NOTICES.md", "LICENS
 if (Test-Path "docs") {
     Copy-Item "docs" -Destination $stage -Recurse -Force
 }
+if ($Flavor -ne "cli" -and (Test-Path "assets\icon\app.svg")) {
+    $iconTarget = Join-Path $stage "assets\icon"
+    New-Item -ItemType Directory -Force -Path $iconTarget | Out-Null
+    Copy-Item "assets\icon\app.svg" -Destination $iconTarget -Force
+}
 if ($Flavor -ne "cli" -and (Test-Path "examples\plugins")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $stage "examples") | Out-Null
     Copy-Item "examples\plugins" -Destination (Join-Path $stage "examples") -Recurse -Force

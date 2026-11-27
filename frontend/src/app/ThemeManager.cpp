@@ -100,7 +100,7 @@ void ThemeManager::toggle()
 
 QString ThemeManager::accentStyleName() const
 {
-    return m_accentStyle == AccentStyle::Flat ? QStringLiteral("flat") : QStringLiteral("gradient");
+    return m_accentStyle == AccentStyle::Blue ? QStringLiteral("blue") : QStringLiteral("pink");
 }
 
 void ThemeManager::setAccentStyle(AccentStyle style)
@@ -155,61 +155,40 @@ void ThemeManager::setAnimationsEnabled(bool enabled)
 QLinearGradient ThemeManager::windowGradient(const Palette &palette, const QRectF &rect)
 {
     QLinearGradient gradient(rect.topLeft(), rect.bottomRight());
-    if (instance()->accentStyle() == AccentStyle::Flat) {
-        // same colours, no gradient: a single calm tone
-        gradient.setColorAt(0.0, palette.windowTop);
-        gradient.setColorAt(1.0, palette.windowTop);
-        return gradient;
-    }
+    // The pink/blue styles are solid themes. Keep both stops identical so the
+    // function remains compatible with older painters without tinting the page.
     gradient.setColorAt(0.0, palette.windowTop);
-    gradient.setColorAt(0.55, palette.dark ? QColor(0x19, 0x19, 0x1B) : QColor(0xFA, 0xF6, 0xFC));
-    gradient.setColorAt(1.0, palette.windowBottom);
+    gradient.setColorAt(1.0, palette.windowTop);
     return gradient;
 }
 
 QLinearGradient ThemeManager::accentGradient(const Palette &palette, const QRectF &rect)
 {
     QLinearGradient gradient(rect.topLeft(), rect.bottomRight());
-    if (instance()->accentStyle() == AccentStyle::Flat) {
-        gradient.setColorAt(0.0, palette.pink);
-        gradient.setColorAt(1.0, palette.pink);
-        return gradient;
-    }
-    gradient.setColorAt(0.0, palette.pink);
-    gradient.setColorAt(0.5, palette.dark ? QColor(0xC6, 0xB2, 0xDE) : QColor(0xDC, 0xC8, 0xEE));
-    gradient.setColorAt(1.0, palette.blue);
+    const QColor accent =
+        instance()->accentStyle() == AccentStyle::Blue ? palette.blue : palette.pink;
+    gradient.setColorAt(0.0, accent);
+    gradient.setColorAt(1.0, accent);
     return gradient;
 }
 
 QLinearGradient ThemeManager::softAccentGradient(const Palette &palette, const QRectF &rect)
 {
     QLinearGradient gradient(rect.topLeft(), rect.bottomRight());
-    QColor pink = palette.pink;
-    QColor blue = palette.blue;
-    pink.setAlphaF(palette.dark ? 0.30 : 0.22);
-    blue.setAlphaF(palette.dark ? 0.26 : 0.20);
-    if (instance()->accentStyle() == AccentStyle::Flat) {
-        gradient.setColorAt(0.0, pink);
-        gradient.setColorAt(1.0, pink);
-        return gradient;
-    }
-    gradient.setColorAt(0.0, pink);
-    gradient.setColorAt(1.0, blue);
+    QColor accent =
+        instance()->accentStyle() == AccentStyle::Blue ? palette.blue : palette.pink;
+    accent.setAlphaF(palette.dark ? 0.30 : 0.22);
+    gradient.setColorAt(0.0, accent);
+    gradient.setColorAt(1.0, accent);
     return gradient;
-}
-
-bool ThemeManager::isFlat()
-{
-    return instance()->accentStyle() == AccentStyle::Flat;
 }
 
 QPair<QColor, QColor> ThemeManager::accentColors(const Palette &palette, int firstAlpha, int secondAlpha)
 {
-    QColor first = palette.pink;
+    QColor first =
+        instance()->accentStyle() == AccentStyle::Blue ? palette.blue : palette.pink;
     first.setAlpha(firstAlpha);
-    if (isFlat())
-        return qMakePair(first, first);
-    QColor second = palette.blue;
+    QColor second = first;
     second.setAlpha(secondAlpha);
     return qMakePair(first, second);
 }
@@ -217,13 +196,8 @@ QPair<QColor, QColor> ThemeManager::accentColors(const Palette &palette, int fir
 QString ThemeManager::styleSheet() const
 {
     const Palette &p = m_palette;
-    // Flat style keeps the same colours but drops every gradient, including the
-    // ones described inside the style sheet.
     const QString accent =
-        m_accentStyle == AccentStyle::Flat
-            ? p.pink.name()
-            : QStringLiteral("qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 %1, stop:1 %2)")
-                  .arg(p.pink.name(), p.blue.name());
+        (m_accentStyle == AccentStyle::Blue ? p.blue : p.pink).name();
 
     QString qss = QStringLiteral(R"QSS(
 * { outline: none; }

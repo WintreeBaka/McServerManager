@@ -8,8 +8,8 @@
 
 namespace mcsm {
 
-/// Colour tokens for one theme. The accent palette stays constant (macaron
-/// pink to blue) while surfaces flip between dark and light.
+/// Colour tokens for one theme. The selected pink or blue accent stays constant
+/// while surfaces flip between dark and light.
 struct Palette
 {
     bool dark = false;
@@ -37,9 +37,9 @@ class ThemeManager : public QObject
     Q_OBJECT
 
 public:
-    /// Gradient = macaron pink→blue blends, Flat = the same colours without any
-    /// gradient (simpler, flatter look).
-    enum class AccentStyle { Gradient, Flat };
+    /// User-selectable solid accent styles. "Pink" is the original flat pink
+    /// accent; "Blue" applies the same treatment to the powder-blue token.
+    enum class AccentStyle { Pink, Blue };
 
     static ThemeManager *instance();
 
@@ -77,10 +77,8 @@ public:
     static QLinearGradient accentGradient(const Palette &palette, const QRectF &rect);
     static QLinearGradient softAccentGradient(const Palette &palette, const QRectF &rect);
 
-    /// True when the user chose the flat (no gradient) colour style.
-    static bool isFlat();
-    /// The two accent colours used for pink→blue blends. In flat mode both
-    /// entries are the same colour, so callers can keep writing two stops.
+    /// The two accent colours used by painters. Both entries are the selected
+    /// solid accent colour; the pair shape keeps older painters compatible.
     static QPair<QColor, QColor> accentColors(const Palette &palette,
                                               int firstAlpha = 255,
                                               int secondAlpha = 255);
@@ -95,7 +93,7 @@ private:
     static QString color(const QColor &value);
 
     bool m_dark = false;   // macaron light theme is the default look
-    AccentStyle m_accentStyle = AccentStyle::Gradient;
+    AccentStyle m_accentStyle = AccentStyle::Pink;
     QString m_fontFamily;
     double m_animationScale = 1.0;
     bool m_animationsEnabled = true;

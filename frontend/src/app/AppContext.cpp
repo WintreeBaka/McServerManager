@@ -124,10 +124,12 @@ void AppContext::loadSettings()
     setAnimationsEnabled(m_settings->value(QStringLiteral("ui/animations"), true).toBool());
     setAnimationScale(m_settings->value(QStringLiteral("ui/animationScale"), 1.0).toDouble());
     const QString accent = m_settings->value(QStringLiteral("ui/accentStyle"),
-                                             QStringLiteral("gradient")).toString();
-    ThemeManager::instance()->setAccentStyle(accent.compare(QLatin1String("flat")) == 0
-                                                ? ThemeManager::AccentStyle::Flat
-                                                : ThemeManager::AccentStyle::Gradient);
+                                             QStringLiteral("pink")).toString();
+    // "flat" and the old default "gradient" both migrate to the original solid
+    // pink accent. Existing users keep their visual identity after upgrading.
+    ThemeManager::instance()->setAccentStyle(accent.compare(QLatin1String("blue")) == 0
+                                                ? ThemeManager::AccentStyle::Blue
+                                                : ThemeManager::AccentStyle::Pink);
     ThemeManager::instance()->setFontFamily(m_settings->value(QStringLiteral("ui/fontFamily")).toString());
     m_experimental = m_settings->value(QStringLiteral("ui/experimental"), false).toBool();
 
@@ -404,14 +406,14 @@ void AppContext::refreshServers(std::function<void(bool, const QString &)> done)
                        });
 }
 
-void AppContext::refreshEnvironment()
+void AppContext::refreshEnvironment(bool force)
 {
     if (!m_backend->isConfigured())
         return;
     // `doctor` shells out to docker/tasklist: it is far too expensive to run on
     // every page activation, so page-triggered checks are rate limited. The
     // background poller (every ~20s) is the only unfiltered caller.
-    if (m_environmentTimer.isValid()
+    if (!force && m_environmentTimer.isValid()
         && m_environmentTimer.elapsed() < constants::kEnvironmentRefreshThrottleMs)
         return;
     m_environmentTimer.restart();

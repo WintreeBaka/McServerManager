@@ -1,11 +1,57 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QDir>
+#include <QFileInfo>
 #include <QFont>
+#include <QIcon>
+#include <QPainter>
+#include <QPixmap>
 #include <QStyleFactory>
 #include <QTimer>
 
 #include "app/AppContext.h"
 #include "ui/MainWindow.h"
+
+namespace {
+
+QPixmap fallbackAppIcon()
+{
+    QPixmap pixmap(128, 128);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    painter.setPen(QPen(QColor(255, 255, 255, 150), 4));
+    painter.setBrush(QColor(0xF6, 0xB9, 0xD3));
+    painter.drawRoundedRect(QRectF(5, 5, 118, 118), 28, 28);
+
+    QFont font;
+    font.setBold(true);
+    font.setPixelSize(62);
+    painter.setFont(font);
+    painter.setPen(QColor(0x3A, 0x30, 0x44));
+    painter.drawText(QRectF(5, 0, 118, 120), Qt::AlignCenter, QStringLiteral("M"));
+    return pixmap;
+}
+
+QIcon applicationIcon()
+{
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.filePath(QStringLiteral("assets/icon/app.svg")),
+        appDir.filePath(QStringLiteral("../../assets/icon/app.svg")),
+    };
+    for (const QString &path : candidates) {
+        if (!QFileInfo::exists(path))
+            continue;
+        const QIcon icon(path);
+        if (!icon.isNull())
+            return icon;
+    }
+    return QIcon(fallbackAppIcon());
+}
+
+} // namespace
 
 int main(int argc, char *argv[])
 {
@@ -13,6 +59,7 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("McServerManager"));
     QApplication::setOrganizationName(QStringLiteral("McServerManager"));
     QApplication::setApplicationVersion(QStringLiteral(MCSM_VERSION));
+    QApplication::setWindowIcon(applicationIcon());
 
     // Draw every control ourselves: the native Windows style ignores parts of
     // the style sheet (combo box popups follow the *system* light/dark theme,

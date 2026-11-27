@@ -11,7 +11,6 @@
 
 #include "app/AppContext.h"
 #include "app/Easing.h"
-#include "widgets/Chip.h"
 
 namespace mcsm {
 
@@ -73,12 +72,8 @@ QWidget *DashboardPage::buildHero()
 
     layout->addLayout(column, 1);
 
-    auto *badge = new Chip(QStringLiteral("马卡龙主题 · 平滑过渡动画"), card);
-    badge->setTone(Chip::Gradient);
-    layout->addWidget(badge, 0, Qt::AlignTop);
-
     connect(create, &QPushButton::clicked, this, &DashboardPage::createServerRequested);
-    connect(check, &QPushButton::clicked, this, &DashboardPage::refresh);
+    connect(check, &QPushButton::clicked, this, &DashboardPage::recheckEnvironment);
     return card;
 }
 
@@ -262,7 +257,7 @@ void DashboardPage::refresh()
 {
     AppContext *context = AppContext::instance();
     context->refreshServers([this, context](bool ok, const QString &message) {
-        if (!ok)
+        if (!ok && message != QStringLiteral("已被更新的请求取代"))
             context->logActivity(QStringLiteral("刷新服务器列表失败：%1").arg(message),
                                  QStringLiteral("error"));
     });
@@ -270,6 +265,11 @@ void DashboardPage::refresh()
     context->refreshEnvironment();
     if (!context->environment().isEmpty())
         applyDoctor(context->environment(), QStringList());
+}
+
+void DashboardPage::recheckEnvironment()
+{
+    AppContext::instance()->refreshEnvironment(true);
 }
 
 void DashboardPage::applyDoctor(const QJsonObject &doctor, const QStringList &warnings)

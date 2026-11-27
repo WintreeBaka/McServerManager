@@ -48,7 +48,7 @@ private:
     int indexOfPluginPage(const QString &pageId) const;
     void selectSidebarItem(int sidebarIndex);
     void syncSidebarTo(int pageIndex);
-    /// Repaints the cached window background (gradient + glow circles).
+    /// Repaints the cached solid window background.
     void renderBackground();
     void invalidateBackground() { m_background = QPixmap(); }
 
@@ -68,8 +68,8 @@ private:
     SettingsPage *m_settings = nullptr;
     QHash<QString, PluginPageView *> m_pluginPages;
     int m_baseSidebarItems = 0;
-    /// The window background is a gradient + two large antialiased circles; it is
-    /// rasterised once per size/theme instead of on every repaint.
+    /// The solid window background is rasterised once per size/theme instead of
+    /// on every repaint.
     QPixmap m_background;
 };
 

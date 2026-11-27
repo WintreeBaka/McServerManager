@@ -296,11 +296,6 @@ void GradientButton::leaveEvent(QEvent *event)
 void GradientButton::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
-    if (m_style == Outline) {
-        QPushButton::paintEvent(event);
-        return;
-    }
-
     const Palette &p = themePalette();
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -312,15 +307,24 @@ void GradientButton::paintEvent(QPaintEvent *event)
 
     const bool enabled = isEnabled();
     QLinearGradient gradient = ThemeManager::accentGradient(p, rect);
-    if (m_style == Soft) {
-        const int first = int(255 * (0.28 + 0.16 * m_glowProgress));
-        const int second = int(255 * (0.24 + 0.16 * m_glowProgress));
+    if (m_style == Outline) {
+        const QColor accent = ThemeManager::accentColors(p).first;
+        // Outline actions used a transparent QSS fill, which made every enabled
+        // secondary action look disabled in dark mode. Keep them visually
+        // secondary through a tinted fill while preserving the pastel brightness.
+        const QColor fill = blend(accent, p.surface, p.dark ? 0.16 : 0.30);
+        const QColor hoverFill = blend(fill, QColor(255, 255, 255), 0.08 + 0.10 * m_glowProgress);
+        gradient.setColorAt(0.0, hoverFill);
+        gradient.setColorAt(1.0, hoverFill);
+    } else if (m_style == Soft) {
+        const int first = int(255 * (0.62 + 0.12 * m_glowProgress));
+        const int second = int(255 * (0.62 + 0.12 * m_glowProgress));
         const QPair<QColor, QColor> colors = ThemeManager::accentColors(p, first, second);
         gradient.setColorAt(0.0, colors.first);
         gradient.setColorAt(1.0, colors.second);
     } else if (m_style == Danger) {
         gradient.setColorAt(0.0, p.danger);
-        gradient.setColorAt(1.0, ThemeManager::isFlat() ? p.danger : blend(p.danger, p.pink, 0.4));
+        gradient.setColorAt(1.0, p.danger);
     } else {
         const QPair<QColor, QColor> colors = ThemeManager::accentColors(p);
         const qreal buttonLift = m_glowProgress * 0.12;
@@ -348,10 +352,9 @@ void GradientButton::paintEvent(QPaintEvent *event)
         painter.drawRoundedRect(rect.adjusted(-1.5, -1.5, 1.5, 1.5), radius + 2, radius + 2);
     }
 
-    // Pastel fills (macaron palette) read better with dark text in both themes.
-    QColor textColor = (m_style == Outline) ? p.text : QColor(0x3A, 0x30, 0x44);
-    if (p.dark && m_style != Outline)
-        textColor = QColor(0x2A, 0x23, 0x33);
+    // Every enabled custom fill is pastel, so dark text remains readable in both
+    // theme modes and never inherits the dimmed disabled colour.
+    QColor textColor = p.dark ? QColor(0x2A, 0x23, 0x33) : QColor(0x3A, 0x30, 0x44);
     if (!enabled)
         textColor = p.textMuted;
 

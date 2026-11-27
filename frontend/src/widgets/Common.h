@@ -20,7 +20,7 @@ namespace mcsm {
 /// Keep height-for-width row widgets inside padded QListWidget items.
 void relayoutListRows(QListWidget *list);
 
-/// Rounded surface with optional hover lift and gradient fill.
+/// Rounded surface with optional hover lift and accent fill.
 class CardFrame : public QFrame
 {
     Q_OBJECT
@@ -65,7 +65,7 @@ private:
     QPropertyAnimation *m_hoverAnimation = nullptr;
 };
 
-/// Button painted with the macaron pink to blue gradient.
+/// Button painted with the selected solid pink or blue accent.
 class GradientButton : public QPushButton
 {
     Q_OBJECT

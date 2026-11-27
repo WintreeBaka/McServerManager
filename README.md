@@ -77,7 +77,7 @@
 
 **界面**
 
-- 暗黑 / 亮色主题，马卡龙粉-蓝配色，可切换**渐变**与**纯色简洁**两种风格
+- 暗黑 / 亮色主题，可切换**粉色**与**蓝色**两种纯色配色风格
 - 所有过渡动画使用贝塞尔曲线缓动，速度可调（或整体关闭）
 - 内置多种字体预设（HarmonyOS Sans SC / Noto Sans SC / 思源黑体 / 微软雅黑 UI / 等线），也可选用系统里的任意字体
 - 无边框窗口、自定义标题栏、平滑页面切换、Toast 提醒
@@ -93,7 +93,7 @@
 | --- | --- |
 | ![配置](docs/screenshots/config-dark.png) | ![备份](docs/screenshots/backup-dark.png) |
 
-| 设置（亮色，独立左菜单） | 纯色简洁风格 |
+| 设置（亮色，独立左菜单） | 旧版纯色风格截图 |
 | --- | --- |
 | ![设置](docs/screenshots/settings-light.png) | ![纯色](docs/screenshots/flat-light.png) |
 
@@ -198,6 +198,7 @@ mcsm-cli plugin service start --name com.example.ops-console     # 启动插件�
 | [`docs/PLUGIN-SDK.md`](docs/PLUGIN-SDK.md) | **管理器插件接口**：包结构、`plugin.json` 全字段、前端 `mcsm.*` API、后端 JSON-Line 钩子与启动补丁、Web 面板、权限与调试 |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | 常见问题与排查方法 |
 | [`docs/SCRIPT-EXECUTION-POLICY.md`](docs/SCRIPT-EXECUTION-POLICY.md) | PowerShell 脚本执行策略与安全建议 |
+| [`assets/icon/README.md`](assets/icon/README.md) | 1.3.1 应用图标预留位置与加载规则 |
 | [`examples/plugins/`](examples/plugins) | 三个可直接安装的示例插件（前端 / 后端 / 全局）+ 打包脚本 |
 | [`packaging/QUICKSTART.txt`](packaging/QUICKSTART.txt) | 面向最终用户的上手说明（随发行包分发） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本记录 |

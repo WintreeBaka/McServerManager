@@ -4,7 +4,7 @@
 
 namespace mcsm {
 
-/// Vertical navigation on the left with a gradient highlight on the active item.
+/// Vertical navigation on the left with a solid accent highlight on the active item.
 class Sidebar : public QWidget
 {
     Q_OBJECT
