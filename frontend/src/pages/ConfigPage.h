@@ -52,6 +52,7 @@ private:
     /// the rollback button at the bottom of the row is clipped.
     void relayoutHistoryRows();
     void rollbackTo(const QString &backupId);
+    void deleteHistory(const QString &backupId);
     void setStatus(const QString &message, bool error = false);
     void setBusy(bool busy);
     /// True when the quick editors or the expert text differ from what was

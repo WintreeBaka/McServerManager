@@ -63,7 +63,8 @@ public:
     static bool prepareDirectory(const ServerRecord &record,
                                  const QMap<QString, QString> &propertyOverrides,
                                  QString *error);
-    static Result deleteServer(ServerStore &store, const QString &id, bool purgeFiles);
+    static Result deleteServer(ServerStore &store, const QString &id, bool purgeFiles,
+                               bool deleteBackups = false);
 };
 
 } // namespace mcsm

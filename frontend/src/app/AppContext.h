@@ -86,6 +86,10 @@ public:
     /// page switching spawns one backend process per activation.
     bool throttle(const QString &key, int minIntervalMs);
 
+    /// Applies the active surface palette to a top-level dialog. Reused by
+    /// dialogs created after the last global theme application.
+    static void applyDialogSurface(QWidget *widget);
+
     /// Starts `mcsm-cli daemon` so scheduled backups keep running while the app
     /// is open. Safe to call repeatedly.
     void startScheduler();
@@ -113,7 +117,6 @@ private:
     void applyTheme();
     /// Resolves the backend data root once, without blocking the GUI thread.
     void resolveDataHome();
-    static void applyDialogSurface(QWidget *widget);
     static void applyComboPopupStyle(QApplication *application);
     void loadSettings();
     void saveSettings();

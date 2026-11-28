@@ -31,6 +31,7 @@ debug.log
 /assets/icon/*
 !/assets/icon/README.md
 !/assets/icon/app.svg
+!/assets/icon/app.ico
 
 # python
 __pycache__/

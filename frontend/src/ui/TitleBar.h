@@ -20,7 +20,7 @@ public:
     void setBackendState(bool available, const QString &detail = QString());
     void setDockerState(const QString &state, const QString &detail = QString());
     void setThemeIsDark(bool dark);
-    /// Re-applies the colours this bar bakes into inline stylesheets (logo, window
+    /// Re-applies the colours this bar bakes into inline stylesheets (window
     /// buttons and the two status chips). Widgets that only carry a `role` property
     /// are restyled by the application stylesheet, but these own their own colours,
     /// so without this they keep the old palette until the next state change.

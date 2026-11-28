@@ -393,24 +393,55 @@ Result ServerInstaller::install(ServerStore &store,
     return result;
 }
 
-Result ServerInstaller::deleteServer(ServerStore &store, const QString &id, bool purgeFiles)
+Result ServerInstaller::deleteServer(ServerStore &store, const QString &id, bool purgeFiles,
+                                     bool deleteBackups)
 {
     const ServerRecord record = store.get(id);
     if (record.id.isEmpty())
         return Result::fail(QStringLiteral("NOT_FOUND"), QStringLiteral("服务器 %1 不存在").arg(id));
+
+    // Validate before changing the registry or stopping containers. A malformed
+    // record must never turn this destructive path into a wider filesystem delete.
+    const QString root = QFileInfo(QDir::cleanPath(AppPaths::serversDir())).absoluteFilePath();
+    const QString expectedDir =
+        QDir::cleanPath(QDir(root).filePath(id));
+    const QString recordDir = QDir::cleanPath(QFileInfo(record.dir).absoluteFilePath());
+    const QString canonicalExpected = QFileInfo(expectedDir).canonicalFilePath();
+    const QString canonicalRecord = QFileInfo(recordDir).canonicalFilePath();
+    const bool sameDirectory =
+        canonicalExpected.isEmpty() ? recordDir.compare(expectedDir, Qt::CaseInsensitive) == 0
+                                    : canonicalRecord.compare(canonicalExpected,
+                                                              Qt::CaseInsensitive)
+                                          == 0;
+    if (!Archive::isInside(root, recordDir) || !sameDirectory) {
+        return Result::fail(QStringLiteral("INVALID_SERVER_PATH"),
+                            QStringLiteral("服务器目录校验失败，已拒绝删除"),
+                            record.dir);
+    }
 
     DockerManager::removeContainer(id, true);
     QString storeError;
     if (!store.remove(id, &storeError))
         return Result::fail(QStringLiteral("STORE_ERROR"), QStringLiteral("删除记录失败"), storeError);
 
+    QStringList cleanupWarnings;
+    if (deleteBackups) {
+        for (const QString &dir : {record.backupDir(), record.configBackupDir()}) {
+            if (QFileInfo::exists(dir) && !QDir(dir).removeRecursively())
+                cleanupWarnings << QStringLiteral("目录未能完全删除：%1").arg(dir);
+        }
+    }
     if (purgeFiles) {
         QDir dir(record.dir);
         if (dir.exists() && !dir.removeRecursively())
-            return Result::ok().warn(QStringLiteral("记录已删除，但目录 %1 未能完全删除").arg(record.dir));
+            cleanupWarnings << QStringLiteral("目录 %1 未能完全删除").arg(record.dir);
     }
-    return Result::ok(QJsonObject {{QStringLiteral("id"), id},
-                                   {QStringLiteral("purged"), purgeFiles}});
+    Result result = Result::ok(QJsonObject {{QStringLiteral("id"), id},
+                                            {QStringLiteral("purged"), purgeFiles},
+                                            {QStringLiteral("backupsDeleted"), deleteBackups}});
+    if (!cleanupWarnings.isEmpty())
+        result.warn(QStringLiteral("记录已删除，但：%1").arg(cleanupWarnings.join(QStringLiteral("；"))));
+    return result;
 }
 
 bool ServerInstaller::cloneJdk(const QString &sourceHome,

@@ -13,6 +13,7 @@ set(MCSM_GUI_SOURCES
     src/ui/ToastHost.cpp
     src/ui/FramelessHelper.cpp
     src/widgets/Common.cpp
+    src/widgets/DestructiveConfirmDialog.cpp
     src/widgets/AnimatedStack.cpp
     src/widgets/LogView.cpp
     src/widgets/Chip.cpp
@@ -44,6 +45,7 @@ set(MCSM_GUI_HEADERS
     src/ui/ToastHost.h
     src/ui/FramelessHelper.h
     src/widgets/Common.h
+    src/widgets/DestructiveConfirmDialog.h
     src/widgets/AnimatedStack.h
     src/widgets/LogView.h
     src/widgets/Chip.h
@@ -60,9 +62,27 @@ set(MCSM_GUI_HEADERS
     src/pages/CreateServerDialog.h
 )
 
+set(MCSM_GUI_PLATFORM_SOURCES)
+if(WIN32)
+    set(MCSM_ICON_ICO "${CMAKE_SOURCE_DIR}/assets/icon/app.ico")
+    if(EXISTS "${MCSM_ICON_ICO}")
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/windows.rc.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/windows.rc"
+            @ONLY
+        )
+        set_source_files_properties(
+            "${CMAKE_CURRENT_BINARY_DIR}/windows.rc"
+            PROPERTIES LANGUAGE RC
+        )
+        list(APPEND MCSM_GUI_PLATFORM_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/windows.rc")
+    endif()
+endif()
+
 qt_add_executable(McServerManager
     ${MCSM_GUI_SOURCES}
     ${MCSM_GUI_HEADERS}
+    ${MCSM_GUI_PLATFORM_SOURCES}
 )
 
 target_include_directories(McServerManager PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

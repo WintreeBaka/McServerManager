@@ -69,6 +69,8 @@ public:
 
     static QVector<ConfigBackup> listBackups(const ServerRecord &record);
     static bool rollback(const ServerRecord &record, const QString &backupId, QString *error);
+    static bool removeBackup(const ServerRecord &record, const QString &backupId,
+                             QString *error = nullptr);
     static bool ensureBaseline(const ServerRecord &record, QString *error);
 
 private:

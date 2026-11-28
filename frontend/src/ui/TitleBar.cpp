@@ -1,9 +1,12 @@
 #include "ui/TitleBar.h"
 
+#include <QApplication>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPixmap>
 #include <QToolButton>
 #include <QWindow>
 
@@ -40,9 +43,11 @@ TitleBar::TitleBar(QWidget *parent)
     identityLayout->setContentsMargins(0, 0, 0, 0);
     identityLayout->setSpacing(10);
 
-    m_logo = new QLabel(QStringLiteral("⛏"), identity);
+    m_logo = new QLabel(identity);
     m_logo->setFixedSize(30, 30);
     m_logo->setAlignment(Qt::AlignCenter);
+    m_logo->setPixmap(QApplication::windowIcon().pixmap(
+        m_logo->size(), m_logo->devicePixelRatioF()));
     m_logo->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
     auto *textColumn = new QWidget(identity);
@@ -104,20 +109,14 @@ TitleBar::TitleBar(QWidget *parent)
             window->close();
     });
 
-    // the logo and the window buttons carry their own colours; applyTheme() paints
-    // them and is called again whenever the palette changes
+    // the window buttons carry their own colours; applyTheme() paints them and is
+    // called again whenever the palette changes
     applyTheme();
 }
 
 void TitleBar::applyTheme()
 {
     const Palette &palette = ThemeManager::instance()->palette();
-    const QPair<QColor, QColor> logoColors = ThemeManager::accentColors(palette);
-    const QString logoBackground = logoColors.first.name();
-    m_logo->setStyleSheet(QStringLiteral("border-radius: 10px; font-size: 16px; color: #2A2333;"
-                                         "background: %1;")
-                              .arg(logoBackground));
-
     const QString controlStyle =
         QStringLiteral("QToolButton { border: none; border-radius: 9px; color: %1; font-size: 13px; }"
                        "QToolButton:hover { background: %2; }"

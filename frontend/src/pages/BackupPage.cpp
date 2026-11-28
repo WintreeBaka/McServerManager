@@ -18,6 +18,7 @@
 #include "app/AppContext.h"
 #include "widgets/Chip.h"
 #include "widgets/Common.h"
+#include "widgets/DestructiveConfirmDialog.h"
 
 namespace mcsm {
 
@@ -376,16 +377,22 @@ void BackupPage::deleteBackup(const QString &name)
 {
     if (m_serverId.isEmpty() || m_busy)
         return;
-    const auto answer = QMessageBox::question(this, QStringLiteral("删除备份"),
-                                             QStringLiteral("确定删除 %1 吗？该操作不可撤销。").arg(name),
-                                             QMessageBox::Yes | QMessageBox::No);
-    if (answer != QMessageBox::Yes)
+    const QString target = m_serverId + QLatin1Char('/') + name;
+    DestructiveConfirmDialog dialog(
+        QStringLiteral("backup.delete"), target, QStringLiteral("删除世界备份"),
+        QStringLiteral("确定删除 %1 吗？备份文件会被永久移除，无法恢复。").arg(name),
+        QStringLiteral("删除备份"), false, true, this);
+    if (dialog.exec() != QDialog::Accepted)
         return;
 
+    setBusy(true, QStringLiteral("正在删除备份…"));
     AppContext::instance()->backend()->request(
         {QStringLiteral("backup"), QStringLiteral("remove"), QStringLiteral("--id"), m_serverId,
-         QStringLiteral("--backup"), name},
+         QStringLiteral("--backup"), name, QStringLiteral("--confirm-token"),
+         dialog.confirmationToken(), QStringLiteral("--confirm-code"),
+         dialog.confirmationCode()},
         this, [this, name](const Reply &reply) {
+            setBusy(false);
             if (!reply.ok) {
                 AppContext::instance()->logActivity(
                     QStringLiteral("删除备份失败：%1").arg(reply.errorText()), QStringLiteral("error"));

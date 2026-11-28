@@ -10,6 +10,7 @@
 
 #include "app/AppContext.h"
 #include "widgets/Chip.h"
+#include "widgets/DestructiveConfirmDialog.h"
 #include "widgets/LogView.h"
 
 namespace mcsm {
@@ -156,10 +157,12 @@ QWidget *ServersPage::buildDetailCard()
     m_backupButton->setStyle(GradientButton::Outline);
     m_pluginButton = new GradientButton(QStringLiteral("插件"), card);
     m_pluginButton->setStyle(GradientButton::Outline);
+    m_deleteButton = new GradientButton(QStringLiteral("删除服务器"), card);
+    m_deleteButton->setStyle(GradientButton::Danger);
 
     const QVector<GradientButton *> actionButtons = {m_primaryButton, m_restartButton, m_killButton,
                                                      m_consoleButton, m_configButton, m_backupButton,
-                                                     m_pluginButton};
+                                                     m_pluginButton, m_deleteButton};
     for (GradientButton *button : actionButtons) {
         button->setCompact(true);
         actions->addWidget(button);
@@ -268,6 +271,10 @@ QWidget *ServersPage::buildDetailCard()
     connect(m_pluginButton, &QPushButton::clicked, this, [this]() {
         if (!m_current.id.isEmpty())
             emit openPluginRequested(m_current.id);
+    });
+    connect(m_deleteButton, &QPushButton::clicked, this, [this]() {
+        if (!m_current.id.isEmpty())
+            requestDelete(m_current.id);
     });
     connect(showLog, &QPushButton::clicked, this, [this]() {
         if (!m_current.id.isEmpty())
@@ -494,6 +501,66 @@ void ServersPage::updateActionButtons(const ServerInfo &info)
     m_configButton->setEnabled(!info.id.isEmpty());
     m_backupButton->setEnabled(!info.id.isEmpty());
     m_pluginButton->setEnabled(!info.id.isEmpty());
+    m_deleteButton->setEnabled(!info.id.isEmpty() && !busyState);
+}
+
+void ServersPage::requestDelete(const QString &serverId)
+{
+    if (serverId.isEmpty() || m_busy)
+        return;
+    const QString label = m_current.name.isEmpty() ? serverId : m_current.name;
+    DestructiveConfirmDialog dialog(
+        QStringLiteral("server.delete"), serverId, QStringLiteral("删除服务器"),
+        QStringLiteral("确定删除服务器“%1”吗？服务器记录和容器将被删除，此操作不可回滚。")
+            .arg(label),
+        QStringLiteral("同时删除世界备份和配置备份"), false, false, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    setBusy(true, QStringLiteral("正在删除服务器…"));
+    AppContext::instance()->backend()->request(
+        {QStringLiteral("server"), QStringLiteral("delete"), QStringLiteral("--id"), serverId,
+         QStringLiteral("--purge"), QStringLiteral("true"), QStringLiteral("--delete-backups"),
+         dialog.optionChecked() ? QStringLiteral("true") : QStringLiteral("false"),
+         QStringLiteral("--confirm-token"), dialog.confirmationToken(),
+         QStringLiteral("--confirm-code"), dialog.confirmationCode()},
+        this, [this, serverId, label](const Reply &reply) {
+            setBusy(false);
+            if (!reply.ok) {
+                AppContext::instance()->logActivity(
+                    QStringLiteral("删除服务器失败：%1").arg(reply.errorText()),
+                    QStringLiteral("error"));
+                return;
+            }
+            for (const QString &warning : reply.warnings)
+                AppContext::instance()->logActivity(warning, QStringLiteral("warning"));
+            AppContext::instance()->logActivity(QStringLiteral("已删除服务器 %1").arg(label),
+                                                QStringLiteral("success"));
+            AppContext::instance()->setSelectedServerId(QString());
+            clearDetail();
+            AppContext::instance()->refreshServers();
+        });
+}
+
+void ServersPage::clearDetail()
+{
+    m_current = ServerInfo();
+    m_list->clearSelection();
+    m_statusDot->setState(QStringLiteral("stopped"));
+    m_nameLabel->setText(QStringLiteral("未选择服务器"));
+    m_summaryLabel->setText(QStringLiteral("从左侧列表选择一台服务器"));
+    m_typeChip->setText(QStringLiteral("--"));
+    m_versionChip->setText(QStringLiteral("--"));
+    m_portChip->setText(QStringLiteral("--"));
+    m_javaChip->setText(QStringLiteral("--"));
+    for (QLabel *label : {m_valuePort, m_valueMemory, m_valueJava, m_valueContainer,
+                          m_valueDirectory, m_valueStarted, m_valueSchedule}) {
+        label->setText(QStringLiteral("--"));
+        label->setToolTip(QString());
+    }
+    m_errorBanner->hide();
+    m_logPreview->setLogLines({});
+    updateActionButtons(m_current);
 }
 
 void ServersPage::setBusy(bool busy, const QString &message)

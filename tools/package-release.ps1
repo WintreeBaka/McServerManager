@@ -89,6 +89,9 @@ if ($Flavor -ne "cli" -and (Test-Path "assets\icon\app.svg")) {
     $iconTarget = Join-Path $stage "assets\icon"
     New-Item -ItemType Directory -Force -Path $iconTarget | Out-Null
     Copy-Item "assets\icon\app.svg" -Destination $iconTarget -Force
+    if (Test-Path "assets\icon\app.ico") {
+        Copy-Item "assets\icon\app.ico" -Destination $iconTarget -Force
+    }
 }
 if ($Flavor -ne "cli" -and (Test-Path "examples\plugins")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $stage "examples") | Out-Null

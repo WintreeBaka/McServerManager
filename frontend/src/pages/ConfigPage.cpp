@@ -23,6 +23,7 @@
 #include "widgets/AnimatedStack.h"
 #include "widgets/Chip.h"
 #include "widgets/Common.h"
+#include "widgets/DestructiveConfirmDialog.h"
 
 namespace mcsm {
 namespace {
@@ -612,10 +613,15 @@ void ConfigPage::loadHistory(const QString &serverId, bool userInitiated)
                 auto *rollback = new GradientButton(QStringLiteral("回滚到此版本"), widget);
                 rollback->setStyle(GradientButton::Outline);
                 rollback->setCompact(true);
+                auto *remove = new GradientButton(QStringLiteral("删除"), widget);
+                remove->setStyle(GradientButton::Danger);
+                remove->setCompact(true);
                 actions->addWidget(rollback);
+                actions->addWidget(remove);
                 actions->addStretch(1);
                 layout->addLayout(actions);
                 connect(rollback, &QPushButton::clicked, this, [this, id]() { rollbackTo(id); });
+                connect(remove, &QPushButton::clicked, this, [this, id]() { deleteHistory(id); });
 
                 m_historyList->setItemWidget(item, widget);
             }
@@ -673,6 +679,41 @@ void ConfigPage::setBusy(bool busy)
 void ConfigPage::relayoutHistoryRows()
 {
     relayoutListRows(m_historyList);
+}
+
+void ConfigPage::deleteHistory(const QString &backupId)
+{
+    if (m_serverId.isEmpty() || backupId.isEmpty() || m_busy)
+        return;
+    const QString target = m_serverId + QLatin1Char('/') + backupId;
+    DestructiveConfirmDialog dialog(
+        QStringLiteral("config.backup.delete"), target, QStringLiteral("删除配置备份"),
+        QStringLiteral("确定删除配置备份 %1 吗？该版本无法再回滚。").arg(backupId),
+        QStringLiteral("删除备份"), false, true, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    setBusy(true);
+    setStatus(QStringLiteral("正在删除配置备份…"));
+    AppContext::instance()->backend()->request(
+        {QStringLiteral("config"), QStringLiteral("remove"), QStringLiteral("--id"), m_serverId,
+         QStringLiteral("--backup"), backupId, QStringLiteral("--confirm-token"),
+         dialog.confirmationToken(), QStringLiteral("--confirm-code"),
+         dialog.confirmationCode()},
+        this, [this, backupId](const Reply &reply) {
+            setBusy(false);
+            if (!reply.ok) {
+                setStatus(QStringLiteral("删除配置备份失败：%1").arg(reply.errorText()), true);
+                AppContext::instance()->logActivity(
+                    QStringLiteral("删除配置备份失败：%1").arg(reply.errorText()),
+                    QStringLiteral("error"));
+                return;
+            }
+            setStatus(QStringLiteral("已删除配置备份 %1").arg(backupId));
+            AppContext::instance()->logActivity(
+                QStringLiteral("已删除配置备份 %1").arg(backupId), QStringLiteral("success"));
+            loadHistory(m_serverId, true);
+        });
 }
 
 void ConfigPage::resizeEvent(QResizeEvent *event)

@@ -79,7 +79,7 @@ mcsm-cli install --name 测试服 --type paper --version 1.21.8 \
 | `server command --id <id> --command "say hi"` | 通过 RCON 发送指令 |
 | `server save --id <id>` | 执行 `save-all flush` |
 | `server update --id <id> [参数]` | 修改记录：`--name` `--memory` `--image` `--java` `--port` `--eula` `--motd` `--level-name` `--auto-restart` `--java-options` |
-| `server delete --id <id> [--purge true]` | 删除记录（`--purge` 连目录一起删除） |
+| `server delete --id <id> [--purge true] [--delete-backups true] --confirm-token <token> --confirm-code <8位数字>` | 删除记录；确认码由后端生成，`--purge` 删除服务器目录，`--delete-backups` 删除世界与配置备份 |
 
 ## 配置文件
 
@@ -92,6 +92,7 @@ mcsm-cli install --name 测试服 --type paper --version 1.21.8 \
 | `config validate --id <id> [--text "..."]` | 语法与取值检查（重复键、类型、范围） |
 | `config backups --id <id>` | 配置备份历史（含改动明细与内容预览） |
 | `config rollback --id <id> --backup <备份ID>` | 回滚到某个历史版本 |
+| `config remove --id <id> --backup <备份ID> --confirm-token <token> --confirm-code <8位数字>` | 删除一个配置备份 |
 
 ## 备份
 
@@ -100,8 +101,21 @@ mcsm-cli install --name 测试服 --type paper --version 1.21.8 \
 | `backup list --id <id>` | 备份列表（大小、时间、来源、备注）+ 计划与总占用 |
 | `backup create --id <id> [--note "..."] [--plugins true] [--save-first true]` | 立即备份；运行中的服务器会先存档 |
 | `backup restore --id <id> --backup <文件名> [--restart true] [--scope world\|all]` | 恢复存档（默认只回滚世界并保留插件/配置） |
-| `backup remove --id <id> --backup <文件名>` | 删除某个备份 |
+| `backup remove --id <id> --backup <文件名> --confirm-token <token> --confirm-code <8位数字>` | 删除某个备份 |
 | `backup schedule --id <id> --enabled true --interval 180 --keep 10 [--plugins true] [--save-first true]` | 定时备份计划 |
+
+## 删除确认
+
+删除服务器、世界备份或配置备份前，先向后端申请一次性确认码：
+
+```powershell
+mcsm-cli confirm issue --action server.delete --target <服务器ID>
+mcsm-cli confirm issue --action backup.delete --target <服务器ID>/<备份文件名>
+mcsm-cli confirm issue --action config.backup.delete --target <服务器ID>/<配置备份ID>
+```
+
+返回的 `token` 与随机 8 位十进制 `code` 都与动作和目标精确绑定，5 分钟后失效，
+只能成功使用一次。GUI 会把后端返回的码展示在删除弹窗中，并要求完整输入后才能确认。
 
 ## 服务器插件（装进某台服务器的 jar）
 

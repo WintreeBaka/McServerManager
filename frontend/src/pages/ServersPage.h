@@ -44,6 +44,8 @@ private:
     void requestStart(const QString &serverId);
     void requestStop(const QString &serverId, bool force);
     void refreshLogPreview();
+    void requestDelete(const QString &serverId);
+    void clearDetail();
     void updateActionButtons(const ServerInfo &info);
 
     QListWidget *m_list = nullptr;
@@ -68,6 +70,7 @@ private:
     GradientButton *m_configButton = nullptr;
     GradientButton *m_backupButton = nullptr;
     GradientButton *m_pluginButton = nullptr;
+    GradientButton *m_deleteButton = nullptr;
 
     QLabel *m_valuePort = nullptr;
     QLabel *m_valueMemory = nullptr;

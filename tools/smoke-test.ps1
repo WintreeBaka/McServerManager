@@ -73,6 +73,15 @@ function Invoke-Cli {
     return $json
 }
 
+function New-ConfirmChallenge {
+    param([string]$Action, [string]$Target)
+    $reply = Invoke-Cli @("confirm", "issue", "--action", $Action, "--target", $Target)
+    if (-not $reply.ok -or $reply.data.token.Length -ne 32 -or $reply.data.code -notmatch '^\d{8}$') {
+        throw "failed to issue deletion challenge for $Action / $Target"
+    }
+    return $reply.data
+}
+
 if (-not (Test-Path $Exe)) { throw "backend not found: $Exe (build first)" }
 $Exe = (Resolve-Path $Exe).Path
 
@@ -169,7 +178,9 @@ $defaultEulaText = if (Test-Path (Join-Path $defaultEulaDir "eula.txt")) {
 Write-Result "EULA defaults to false" ($defaultEula.ok -and $defaultEulaText -match '(?m)^eula=false$') `
     ("eula.txt=" + $defaultEulaText.Trim())
 if ($defaultEula.ok) {
-    Invoke-Cli @("server", "delete", "--id", "smoke-eula-default") | Out-Null
+    $confirm = New-ConfirmChallenge "server.delete" "smoke-eula-default"
+    Invoke-Cli @("server", "delete", "--id", "smoke-eula-default",
+                 "--confirm-token", $confirm.token, "--confirm-code", $confirm.code) | Out-Null
 }
 
 $install = Invoke-Cli @(
@@ -277,6 +288,32 @@ $afterRollback = Invoke-Cli @("config", "read", "--id", $serverId)
 Write-Result "rollback restored previous value" ($afterRollback.data.values.'max-players' -eq "20") `
     ("max-players=" + $afterRollback.data.values.'max-players')
 
+$backupsAfterRollback = Invoke-Cli @("config", "backups", "--id", $serverId)
+$configCountBeforeDelete = $backupsAfterRollback.data.count
+$configTarget = $serverId + "/" + $rollbackId
+$configNoConfirm = Invoke-Cli @(
+    "config", "remove", "--id", $serverId, "--backup", $rollbackId
+) -AllowFailure
+Write-Result "config backup delete requires confirmation" `
+    ((-not $configNoConfirm.ok) -and $configNoConfirm.error.code -eq "CONFIRMATION_REQUIRED") `
+    ("code=" + $configNoConfirm.error.code)
+$configConfirm = New-ConfirmChallenge "config.backup.delete" $configTarget
+$configDelete = Invoke-Cli @(
+    "config", "remove", "--id", $serverId, "--backup", $rollbackId,
+    "--confirm-token", $configConfirm.token, "--confirm-code", $configConfirm.code
+)
+$configAfterDelete = Invoke-Cli @("config", "backups", "--id", $serverId)
+Write-Result "config backup delete" `
+    ($configDelete.ok -and $configAfterDelete.data.count -eq ($configCountBeforeDelete - 1)) `
+    ("before=" + $configCountBeforeDelete + " after=" + $configAfterDelete.data.count)
+$configReplay = Invoke-Cli @(
+    "config", "remove", "--id", $serverId, "--backup", $rollbackId,
+    "--confirm-token", $configConfirm.token, "--confirm-code", $configConfirm.code
+) -AllowFailure
+Write-Result "deletion confirmation is single-use" `
+    ((-not $configReplay.ok) -and $configReplay.error.code -eq "CONFIRMATION_INVALID") `
+    ("code=" + $configReplay.error.code)
+
 # ----------------------------------------------------------------- backup ----
 Write-Host ""
 Write-Host "world backup" -ForegroundColor Cyan
@@ -303,9 +340,18 @@ Write-Result "backup list" ($backupList.ok -and $backupList.data.count -ge 1) `
 $badRemove = Invoke-Cli @(
     "backup", "remove", "--id", $serverId, "--backup", "../../outside.tar.gz"
 ) -AllowFailure
-Write-Result "backup remove rejects traversal" `
-    ((-not $badRemove.ok) -and $badRemove.error.code -eq "INVALID_ARGUMENT") `
+Write-Result "backup remove requires confirmation" `
+    ((-not $badRemove.ok) -and $badRemove.error.code -eq "CONFIRMATION_REQUIRED") `
     ("code=" + $badRemove.error.code)
+$badBackupTarget = $serverId + "/../../outside.tar.gz"
+$badConfirm = New-ConfirmChallenge "backup.delete" $badBackupTarget
+$badConfirmedRemove = Invoke-Cli @(
+    "backup", "remove", "--id", $serverId, "--backup", "../../outside.tar.gz",
+    "--confirm-token", $badConfirm.token, "--confirm-code", $badConfirm.code
+) -AllowFailure
+Write-Result "confirmed backup remove still rejects traversal" `
+    ((-not $badConfirmedRemove.ok) -and $badConfirmedRemove.error.code -eq "INVALID_ARGUMENT") `
+    ("code=" + $badConfirmedRemove.error.code)
 
 $badRestorePath = Join-Path $assets "outside.tar.gz"
 $badRestore = Invoke-Cli @(
@@ -336,6 +382,16 @@ Write-Result "zip-slip restore leaves no escaped file" `
     (-not (Test-Path (Join-Path $serverDir "backup-escape.txt"))) "escaped file was written"
 Write-Result "zip-slip failure rolls world back" `
     (Test-Path (Join-Path $worldDir "level.dat")) "world data was not restored"
+
+if ($backupName) {
+    $backupConfirm = New-ConfirmChallenge "backup.delete" ($serverId + "/" + $backupName)
+    $backupDelete = Invoke-Cli @(
+        "backup", "remove", "--id", $serverId, "--backup", $backupName,
+        "--confirm-token", $backupConfirm.token, "--confirm-code", $backupConfirm.code
+    )
+    Write-Result "world backup delete with backend confirmation" `
+        ($backupDelete.ok -and -not (Test-Path $archivePath)) $backupDelete.error.message
+}
 
 $schedule = Invoke-Cli @("backup", "schedule", "--id", $serverId, "--enabled", "true",
                         "--interval", "10", "--keep", "3")
@@ -953,8 +1009,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 # ----------------------------------------------------------------- cleanup ----
 Write-Host ""
 Write-Host "cleanup" -ForegroundColor Cyan
-$delete = Invoke-Cli @("server", "delete", "--id", $serverId, "--purge", "true")
+$deleteWithoutConfirm = Invoke-Cli @("server", "delete", "--id", $serverId, "--purge", "true") -AllowFailure
+Write-Result "server delete requires backend confirmation" `
+    ((-not $deleteWithoutConfirm.ok) -and $deleteWithoutConfirm.error.code -eq "CONFIRMATION_REQUIRED") `
+    ("code=" + $deleteWithoutConfirm.error.code)
+$deleteConfirm = New-ConfirmChallenge "server.delete" $serverId
+$delete = Invoke-Cli @("server", "delete", "--id", $serverId, "--purge", "true",
+                       "--delete-backups", "true", "--confirm-token", $deleteConfirm.token,
+                       "--confirm-code", $deleteConfirm.code)
 Write-Result "server delete" ($delete.ok) $delete.error.message
+Write-Result "server delete reports backup cleanup" `
+    ($delete.ok -and $delete.data.backupsDeleted) ("backupsDeleted=" + $delete.data.backupsDeleted)
 Write-Result "server directory removed" (-not (Test-Path $serverDir)) "directory still exists"
 
 $finalList = Invoke-Cli @("server", "list")

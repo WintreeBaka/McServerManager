@@ -1,6 +1,7 @@
 set(MCSM_BACKEND_SOURCES
     src/main.cpp
     src/cli/ArgParser.cpp
+    src/cli/ConfirmationService.cpp
     src/cli/CommandRouter.cpp
     src/core/AppPaths.cpp
     src/core/Archive.cpp
@@ -30,6 +31,7 @@ set(MCSM_BACKEND_SOURCES
 
 set(MCSM_BACKEND_HEADERS
     src/cli/ArgParser.h
+    src/cli/ConfirmationService.h
     src/cli/CommandRouter.h
     src/core/AppPaths.h
     src/core/Archive.h

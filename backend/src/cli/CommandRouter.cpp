@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 
 #include "backup/BackupService.h"
+#include "cli/ConfirmationService.h"
 #include "config/ConfigManager.h"
 #include "config/ConfigSchema.h"
 #include "core/AppPaths.h"
@@ -58,6 +59,7 @@ QStringList CommandRouter::helpLines() const
         QStringLiteral("  java --action list|ensure [--major 17]    JDK 镜像管理"),
         QStringLiteral("  install --name X --type paper --version 1.20.4 [--port 25565]"),
         QStringLiteral("  server list|get|start|stop|restart|kill|status|delete ..."),
+        QStringLiteral("  confirm issue --action <name> --target <exact-target>"),
         QStringLiteral("  server logs --id X [--tail 200] [--follow]"),
         QStringLiteral("  server command --id X --command \"say hi\""),
         QStringLiteral("  config schema|read|apply|raw|validate|backups|rollback --id X"),
@@ -117,6 +119,8 @@ Result CommandRouter::dispatch(const QString &command)
         return cmdSchedule();
     if (command == QLatin1String("settings"))
         return cmdSettings();
+    if (command == QLatin1String("confirm"))
+        return cmdConfirm();
     if (command == QLatin1String("version")) {
         return Result::ok(QJsonObject {
             {QStringLiteral("name"), QStringLiteral("mcsm-cli")},
@@ -477,8 +481,14 @@ Result CommandRouter::cmdServer()
     }
     if (action == QLatin1String("save"))
         return ServerLifecycle::saveWorld(store, id);
-    if (action == QLatin1String("delete") || action == QLatin1String("remove"))
-        return ServerInstaller::deleteServer(store, id, m_args.boolValue(QStringLiteral("purge"), false));
+    if (action == QLatin1String("delete") || action == QLatin1String("remove")) {
+        const Result confirmed = requireConfirmation(QStringLiteral("server.delete"), id);
+        if (!confirmed.isOk())
+            return confirmed;
+        return ServerInstaller::deleteServer(
+            store, id, m_args.boolValue(QStringLiteral("purge"), false),
+            m_args.boolValue(QStringLiteral("delete-backups"), false));
+    }
 
     return Result::fail(QStringLiteral("UNKNOWN_ACTION"),
                         QStringLiteral("未知 server 子命令 '%1'").arg(action));
@@ -622,6 +632,22 @@ Result CommandRouter::cmdConfig()
                                        {QStringLiteral("values"),
                                         Json::fromMap(ConfigManager::readProperties(record))}});
     }
+    if (action == QLatin1String("remove") || action == QLatin1String("delete")) {
+        const QString backupId = m_args.value(QStringLiteral("backup"), m_args.positional(3));
+        if (backupId.isEmpty())
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"), QStringLiteral("缺少 --backup"));
+        const QString target = id + QLatin1Char('/') + backupId;
+        const Result confirmed = requireConfirmation(QStringLiteral("config.backup.delete"), target);
+        if (!confirmed.isOk())
+            return confirmed;
+        QString error;
+        if (!ConfigManager::removeBackup(record, backupId, &error)) {
+            return Result::fail(QStringLiteral("DELETE_FAILED"),
+                                QStringLiteral("删除配置备份失败"), error);
+        }
+        return Result::ok(QJsonObject {{QStringLiteral("removed"), backupId},
+                                       {QStringLiteral("target"), target}});
+    }
     return Result::fail(QStringLiteral("UNKNOWN_ACTION"),
                         QStringLiteral("未知 config 子命令 '%1'").arg(action));
 }
@@ -668,6 +694,12 @@ Result CommandRouter::cmdBackup()
     }
     if (action == QLatin1String("remove")) {
         const QString name = m_args.value(QStringLiteral("backup"), m_args.positional(3));
+        if (name.isEmpty())
+            return Result::fail(QStringLiteral("INVALID_ARGUMENT"), QStringLiteral("缺少 --backup"));
+        const QString target = id + QLatin1Char('/') + name;
+        const Result confirmed = requireConfirmation(QStringLiteral("backup.delete"), target);
+        if (!confirmed.isOk())
+            return confirmed;
         return BackupService::remove(record, name);
     }
     if (action == QLatin1String("schedule")) {
@@ -1123,6 +1155,32 @@ Result CommandRouter::cmdSettings()
     }
     return Result::fail(QStringLiteral("UNKNOWN_ACTION"),
                         QStringLiteral("未知 settings 子命令 '%1'").arg(action));
+}
+
+Result CommandRouter::cmdConfirm()
+{
+    const QString action = m_args.positional(1).toLower();
+    if (action != QLatin1String("issue")) {
+        return Result::fail(QStringLiteral("UNKNOWN_ACTION"),
+                            QStringLiteral("未知 confirm 子命令 '%1'").arg(action));
+    }
+    return ConfirmationService::issue(m_args.value(QStringLiteral("action")),
+                                      m_args.value(QStringLiteral("target")));
+}
+
+Result CommandRouter::requireConfirmation(const QString &action,
+                                          const QString &target) const
+{
+    const QString token = m_args.value(QStringLiteral("confirm-token"));
+    const QString code = m_args.value(QStringLiteral("confirm-code"));
+    if (token.isEmpty() || code.isEmpty()) {
+        return Result::fail(
+            QStringLiteral("CONFIRMATION_REQUIRED"),
+            QStringLiteral("该删除操作需要后端确认码"),
+            QStringLiteral("先运行 confirm issue --action %1 --target %2，再把 token 和 8 位确认码传给删除命令")
+                .arg(action, target));
+    }
+    return ConfirmationService::consume(action, target, token, code);
 }
 
 } // namespace mcsm

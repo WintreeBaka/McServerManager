@@ -10,6 +10,7 @@
 
 #include "config/ConfigSchema.h"
 #include "core/AppPaths.h"
+#include "core/Archive.h"
 #include "core/Logger.h"
 #include "core/StringUtil.h"
 #include "server/ServerRecord.h"
@@ -490,6 +491,59 @@ bool ConfigManager::rollback(const ServerRecord &record, const QString &backupId
                  QStringLiteral("回滚到 %1").arg(backupId), changes, nullptr);
     }
     return writeTextLf(record.propertiesPath(), restoreText, error);
+}
+
+bool ConfigManager::removeBackup(const ServerRecord &record, const QString &backupId,
+                                 QString *error)
+{
+    const QString dir = record.configBackupDir();
+    if (!QFileInfo::exists(dir)) {
+        if (error)
+            *error = QStringLiteral("配置备份 %1 不存在").arg(backupId);
+        return false;
+    }
+
+    const QVector<ConfigBackup> backups = listBackups(record);
+    ConfigBackup target;
+    for (const ConfigBackup &backup : backups) {
+        if (backup.id == backupId) {
+            target = backup;
+            break;
+        }
+    }
+    if (target.id.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("配置备份 %1 不存在").arg(backupId);
+        return false;
+    }
+
+    QString file = target.file;
+    if (file.isEmpty())
+        file = QDir(dir).filePath(target.id + QStringLiteral(".properties"));
+    if (!Archive::isInside(dir, file)) {
+        if (error)
+            *error = QStringLiteral("配置备份路径越界");
+        return false;
+    }
+    if (QFileInfo::exists(file) && !QFile::remove(file)) {
+        if (error)
+            *error = QStringLiteral("无法删除配置备份文件：%1").arg(file);
+        return false;
+    }
+
+    QJsonObject index = readIndex(dir);
+    QJsonArray entries = index.value(QStringLiteral("entries")).toArray();
+    QJsonArray filtered;
+    for (const QJsonValue &value : entries) {
+        if (Json::str(value.toObject(), QStringLiteral("id")) != target.id)
+            filtered.append(value);
+    }
+    index.insert(QStringLiteral("entries"), filtered);
+    if (!writeIndex(dir, index, error))
+        return false;
+    Logger::info(QStringLiteral("config"),
+                 QStringLiteral("removed backup %1 for %2").arg(target.id, record.id));
+    return true;
 }
 
 bool ConfigManager::ensureBaseline(const ServerRecord &record, QString *error)

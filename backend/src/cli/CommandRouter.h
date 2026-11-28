@@ -36,6 +36,8 @@ private:
     Result cmdPluginPackage();
     Result cmdSchedule();
     Result cmdSettings();
+    Result cmdConfirm();
+    Result requireConfirmation(const QString &action, const QString &target) const;
 
     Args m_args;
     QString m_command;

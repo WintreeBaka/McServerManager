@@ -89,7 +89,12 @@ void ToastHost::push(const QString &message, const QString &level, int timeoutMs
         accent = palette.pink;
     }
 
-    auto *card = new CardFrame(this);
+    auto *holder = new QWidget(this);
+    holder->setProperty("mcsmToastHolder", true);
+    holder->setMaximumHeight(0);
+    holder->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+    auto *card = new CardFrame(holder);
     card->setVariant(CardFrame::Surface);
     card->setRadius(16);
     auto *layout = CardFrame::horizontalLayout(card, 14, 10);
@@ -115,10 +120,10 @@ void ToastHost::push(const QString &message, const QString &level, int timeoutMs
     auto *effect = new QGraphicsOpacityEffect(card);
     effect->setOpacity(0.0);
     card->setGraphicsEffect(effect);
-    card->setMaximumHeight(0);
+    card->setMinimumHeight(44);
 
-    m_layout->insertWidget(qMax(0, m_layout->count() - 1), card);
-    m_toasts.append(card);
+    m_layout->insertWidget(qMax(0, m_layout->count() - 1), holder);
+    m_toasts.append(holder);
     while (m_toasts.size() > m_maxVisible) {
         QWidget *oldest = m_toasts.takeFirst();
         dismissToast(oldest);
@@ -134,40 +139,49 @@ void ToastHost::push(const QString &message, const QString &level, int timeoutMs
     m_layout->activate();
 
     const int targetHeight = qMax(44, card->sizeHint().height());
-    if (!ThemeManager::instance()->animationsEnabled()) {
-        card->setMaximumHeight(QWIDGETSIZE_MAX);
+    const bool animations = ThemeManager::instance()->animationsEnabled();
+    card->setGeometry(animations ? width() : 0, 0, width(), targetHeight);
+    if (!animations) {
+        holder->setMaximumHeight(targetHeight);
+        card->move(0, 0);
         effect->setOpacity(1.0);
     } else {
-        auto *group = new QParallelAnimationGroup(card);
+        auto *group = new QParallelAnimationGroup(holder);
         auto *fade = new QPropertyAnimation(effect, "opacity", group);
         fade->setDuration(Easing::normal());
         fade->setEasingCurve(Easing::entrance());
         fade->setStartValue(0.0);
         fade->setEndValue(1.0);
-        auto *reveal = new QPropertyAnimation(card, "maximumHeight", group);
+        auto *reveal = new QPropertyAnimation(holder, "maximumHeight", group);
         reveal->setDuration(Easing::normal());
         reveal->setEasingCurve(Easing::entrance());
         reveal->setStartValue(0);
         reveal->setEndValue(targetHeight);
-        connect(group, &QParallelAnimationGroup::finished, card, [card]() {
-            card->setMaximumHeight(QWIDGETSIZE_MAX);
+        auto *slide = new QPropertyAnimation(card, "pos", group);
+        slide->setDuration(Easing::normal());
+        slide->setEasingCurve(Easing::entrance());
+        slide->setStartValue(QPoint(width(), 0));
+        slide->setEndValue(QPoint(0, 0));
+        connect(group, &QParallelAnimationGroup::finished, holder, [holder, card, targetHeight]() {
+            holder->setMaximumHeight(targetHeight);
+            card->setGeometry(0, 0, holder->width(), targetHeight);
         });
         group->start(QAbstractAnimation::DeleteWhenStopped);
     }
 
-    QTimer::singleShot(qMax(1200, timeoutMs), card,
-                       [this, card]() { dismissToast(card); });
+    QTimer::singleShot(qMax(1200, timeoutMs), holder,
+                       [this, holder]() { dismissToast(holder); });
 }
 
-void ToastHost::dismissToast(QWidget *toast, bool immediate)
+void ToastHost::dismissToast(QWidget *holder, bool immediate)
 {
-    if (!toast)
+    if (!holder)
         return;
-    m_toasts.removeAll(toast);
-    const auto finish = [this, toast]() {
-        m_dismissing.remove(toast);
-        m_layout->removeWidget(toast);
-        toast->deleteLater();
+    m_toasts.removeAll(holder);
+    const auto finish = [this, holder]() {
+        m_dismissing.remove(holder);
+        m_layout->removeWidget(holder);
+        holder->deleteLater();
         m_layout->invalidate();
         m_layout->activate();
         if (m_toasts.isEmpty() && m_dismissing.isEmpty())
@@ -178,16 +192,21 @@ void ToastHost::dismissToast(QWidget *toast, bool immediate)
         finish();
         return;
     }
-    if (m_dismissing.contains(toast))
+    if (m_dismissing.contains(holder))
         return;
-    m_dismissing.insert(toast);
+    m_dismissing.insert(holder);
 
+    QWidget *card = holder->findChild<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+    if (!card) {
+        finish();
+        return;
+    }
     const qreal startOpacity =
-        qobject_cast<QGraphicsOpacityEffect *>(toast->graphicsEffect())
-            ? qobject_cast<QGraphicsOpacityEffect *>(toast->graphicsEffect())->opacity()
+        qobject_cast<QGraphicsOpacityEffect *>(card->graphicsEffect())
+            ? qobject_cast<QGraphicsOpacityEffect *>(card->graphicsEffect())->opacity()
             : 1.0;
-    auto *fadeEffect = qobject_cast<QGraphicsOpacityEffect *>(toast->graphicsEffect());
-    auto *group = new QParallelAnimationGroup(toast);
+    auto *fadeEffect = qobject_cast<QGraphicsOpacityEffect *>(card->graphicsEffect());
+    auto *group = new QParallelAnimationGroup(holder);
     if (fadeEffect) {
         auto *fade = new QPropertyAnimation(fadeEffect, "opacity", group);
         fade->setDuration(Easing::fast());
@@ -195,21 +214,28 @@ void ToastHost::dismissToast(QWidget *toast, bool immediate)
         fade->setStartValue(startOpacity);
         fade->setEndValue(0.0);
     }
-    auto *contract = new QPropertyAnimation(toast, "maximumHeight", group);
+    auto *contract = new QPropertyAnimation(holder, "maximumHeight", group);
     contract->setDuration(Easing::fast());
     contract->setEasingCurve(Easing::standard());
-    contract->setStartValue(qMax(0, toast->height()));
+    contract->setStartValue(qMax(0, holder->height()));
     contract->setEndValue(0);
+    auto *slide = new QPropertyAnimation(card, "pos", group);
+    slide->setDuration(Easing::fast());
+    slide->setEasingCurve(Easing::standard());
+    slide->setStartValue(card->pos());
+    slide->setEndValue(QPoint(holder->width(), card->y()));
     connect(group, &QParallelAnimationGroup::finished, this, finish);
     group->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void ToastHost::clearAll()
 {
-    const QList<QWidget *> cards = findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
-    for (QWidget *toast : cards) {
-        m_layout->removeWidget(toast);
-        delete toast;
+    const QList<QWidget *> holders = findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+    for (QWidget *holder : holders) {
+        if (!holder->property("mcsmToastHolder").toBool())
+            continue;
+        m_layout->removeWidget(holder);
+        delete holder;
     }
     m_toasts.clear();
     m_dismissing.clear();
