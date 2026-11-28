@@ -115,63 +115,104 @@ void ToastHost::push(const QString &message, const QString &level, int timeoutMs
     auto *effect = new QGraphicsOpacityEffect(card);
     effect->setOpacity(0.0);
     card->setGraphicsEffect(effect);
+    card->setMaximumHeight(0);
 
     m_layout->insertWidget(qMax(0, m_layout->count() - 1), card);
     m_toasts.append(card);
     while (m_toasts.size() > m_maxVisible) {
         QWidget *oldest = m_toasts.takeFirst();
-        m_layout->removeWidget(oldest);
-        oldest->deleteLater();
+        dismissToast(oldest);
     }
 
     show();
     raise();
     reposition();
 
-    // The layout owns the position. Animating `pos` here used to leave every card
-    // shifted 34px to the right (clipped at the window edge) and made two notices
-    // pushed together overlap, which looked like a third notification. Fade in place.
+    // Animate reveal height and opacity together. The layout owns positions, so
+    // this keeps the stack aligned while survivors are pushed upward naturally.
     m_layout->invalidate();
     m_layout->activate();
 
-    auto *group = new QParallelAnimationGroup(card);
-    auto *fade = new QPropertyAnimation(effect, "opacity", group);
-    fade->setDuration(Easing::normal());
-    fade->setEasingCurve(Easing::entrance());
-    fade->setStartValue(0.0);
-    fade->setEndValue(1.0);
-
-    group->start(QAbstractAnimation::DeleteWhenStopped);
-
-    QTimer::singleShot(qMax(1200, timeoutMs), card, [this, card, effect]() {
-        auto *outGroup = new QParallelAnimationGroup(card);
-        auto *fadeOut = new QPropertyAnimation(effect, "opacity", outGroup);
-        fadeOut->setDuration(Easing::fast());
-        fadeOut->setEasingCurve(Easing::standard());
-        fadeOut->setStartValue(effect->opacity());
-        fadeOut->setEndValue(0.0);
-
-        QObject::connect(outGroup, &QParallelAnimationGroup::finished, this, [this, card]() {
-            m_toasts.removeAll(card);
-            m_layout->removeWidget(card);
-            card->deleteLater();
-            // re-place the survivors so the stack stays aligned after a removal
-            m_layout->invalidate();
-            m_layout->activate();
-            if (m_toasts.isEmpty())
-                hide();
+    const int targetHeight = qMax(44, card->sizeHint().height());
+    if (!ThemeManager::instance()->animationsEnabled()) {
+        card->setMaximumHeight(QWIDGETSIZE_MAX);
+        effect->setOpacity(1.0);
+    } else {
+        auto *group = new QParallelAnimationGroup(card);
+        auto *fade = new QPropertyAnimation(effect, "opacity", group);
+        fade->setDuration(Easing::normal());
+        fade->setEasingCurve(Easing::entrance());
+        fade->setStartValue(0.0);
+        fade->setEndValue(1.0);
+        auto *reveal = new QPropertyAnimation(card, "maximumHeight", group);
+        reveal->setDuration(Easing::normal());
+        reveal->setEasingCurve(Easing::entrance());
+        reveal->setStartValue(0);
+        reveal->setEndValue(targetHeight);
+        connect(group, &QParallelAnimationGroup::finished, card, [card]() {
+            card->setMaximumHeight(QWIDGETSIZE_MAX);
         });
-        outGroup->start(QAbstractAnimation::DeleteWhenStopped);
-    });
+        group->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    QTimer::singleShot(qMax(1200, timeoutMs), card,
+                       [this, card]() { dismissToast(card); });
+}
+
+void ToastHost::dismissToast(QWidget *toast, bool immediate)
+{
+    if (!toast)
+        return;
+    m_toasts.removeAll(toast);
+    const auto finish = [this, toast]() {
+        m_dismissing.remove(toast);
+        m_layout->removeWidget(toast);
+        toast->deleteLater();
+        m_layout->invalidate();
+        m_layout->activate();
+        if (m_toasts.isEmpty() && m_dismissing.isEmpty())
+            hide();
+    };
+
+    if (immediate || !ThemeManager::instance()->animationsEnabled()) {
+        finish();
+        return;
+    }
+    if (m_dismissing.contains(toast))
+        return;
+    m_dismissing.insert(toast);
+
+    const qreal startOpacity =
+        qobject_cast<QGraphicsOpacityEffect *>(toast->graphicsEffect())
+            ? qobject_cast<QGraphicsOpacityEffect *>(toast->graphicsEffect())->opacity()
+            : 1.0;
+    auto *fadeEffect = qobject_cast<QGraphicsOpacityEffect *>(toast->graphicsEffect());
+    auto *group = new QParallelAnimationGroup(toast);
+    if (fadeEffect) {
+        auto *fade = new QPropertyAnimation(fadeEffect, "opacity", group);
+        fade->setDuration(Easing::fast());
+        fade->setEasingCurve(Easing::standard());
+        fade->setStartValue(startOpacity);
+        fade->setEndValue(0.0);
+    }
+    auto *contract = new QPropertyAnimation(toast, "maximumHeight", group);
+    contract->setDuration(Easing::fast());
+    contract->setEasingCurve(Easing::standard());
+    contract->setStartValue(qMax(0, toast->height()));
+    contract->setEndValue(0);
+    connect(group, &QParallelAnimationGroup::finished, this, finish);
+    group->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void ToastHost::clearAll()
 {
-    for (QWidget *toast : m_toasts) {
+    const QList<QWidget *> cards = findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+    for (QWidget *toast : cards) {
         m_layout->removeWidget(toast);
-        toast->deleteLater();
+        delete toast;
     }
     m_toasts.clear();
+    m_dismissing.clear();
     hide();
 }
 

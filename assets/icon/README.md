@@ -1,13 +1,12 @@
 # Application icon
 
-The production SVG icon will be added for 1.3.1 at:
+The production SVG icon is stored at:
 
 `assets/icon/app.svg`
 
 The desktop client already searches for this file beside the executable and in
-the source tree. Until the final asset is supplied it draws a temporary
-placeholder icon so the window and taskbar are not blank.
+the source tree. Draft images remain local; only the approved production asset
+and this README are tracked.
 
-All files in this directory except this README are ignored by Git to prevent
-partial or generated icon drafts from being pushed accidentally. When the final
-asset is approved for 1.3.1, force-add that exact file or narrow the ignore rule.
+To replace the icon, overwrite `app.svg`. The packaging script copies it into
+the GUI release under the same relative path.

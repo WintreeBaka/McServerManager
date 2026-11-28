@@ -346,6 +346,7 @@ QCheckBox::indicator:checked:hover { background-color: %PINK%; }
 QSlider::groove:horizontal {
     height: 6px; border-radius: 3px; background: %BORDER%;
 }
+QSlider { min-height: 28px; padding: 0 8px; }
 QSlider::sub-page:horizontal { background: %ACCENT%; border-radius: 3px; }
 QSlider::handle:horizontal {
     /* 14px content + 2px border = 18px box; groove is 6px, so -6px margin centers it */

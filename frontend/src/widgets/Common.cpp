@@ -302,26 +302,18 @@ void GradientButton::paintEvent(QPaintEvent *event)
 
     QRectF rect = QRectF(this->rect()).adjusted(1.0, 1.0, -1.0, -1.0);
     const qreal radius = m_compact ? 10.0 : 12.0;
-    const qreal lift = m_glowProgress * 1.0;
-    rect.adjust(0, -lift, 0, -lift);
-
     const bool enabled = isEnabled();
     QLinearGradient gradient = ThemeManager::accentGradient(p, rect);
-    if (m_style == Outline) {
+    QColor borderColor = Qt::transparent;
+    if (m_style == Outline || m_style == Soft) {
         const QColor accent = ThemeManager::accentColors(p).first;
-        // Outline actions used a transparent QSS fill, which made every enabled
-        // secondary action look disabled in dark mode. Keep them visually
-        // secondary through a tinted fill while preserving the pastel brightness.
-        const QColor fill = blend(accent, p.surface, p.dark ? 0.16 : 0.30);
-        const QColor hoverFill = blend(fill, QColor(255, 255, 255), 0.08 + 0.10 * m_glowProgress);
+        // Outline and Soft are the same secondary action level. They used to
+        // paint different alpha levels, so adjacent buttons looked mismatched.
+        const QColor fill = blend(accent, p.surface, p.dark ? 0.14 : 0.20);
+        const QColor hoverFill = blend(fill, QColor(255, 255, 255), 0.07 + 0.08 * m_glowProgress);
         gradient.setColorAt(0.0, hoverFill);
         gradient.setColorAt(1.0, hoverFill);
-    } else if (m_style == Soft) {
-        const int first = int(255 * (0.62 + 0.12 * m_glowProgress));
-        const int second = int(255 * (0.62 + 0.12 * m_glowProgress));
-        const QPair<QColor, QColor> colors = ThemeManager::accentColors(p, first, second);
-        gradient.setColorAt(0.0, colors.first);
-        gradient.setColorAt(1.0, colors.second);
+        borderColor = blend(accent, p.border, 0.18);
     } else if (m_style == Danger) {
         gradient.setColorAt(0.0, p.danger);
         gradient.setColorAt(1.0, p.danger);
@@ -335,17 +327,23 @@ void GradientButton::paintEvent(QPaintEvent *event)
         const QPair<QColor, QColor> flatColors = ThemeManager::accentColors(p);
         gradient.setColorAt(0.0, blend(flatColors.first, p.surface, 0.7));
         gradient.setColorAt(1.0, blend(flatColors.second, p.surface, 0.7));
+        borderColor = p.border;
     }
 
     if (isDown())
-        rect.adjust(0, 1.4, 0, 1.4);
+        rect.adjust(0, 1.0, 0, 1.0);
 
     painter.setPen(Qt::NoPen);
     painter.setBrush(gradient);
     painter.drawRoundedRect(rect, radius, radius);
+    if (borderColor.alpha() > 0) {
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(borderColor, 1.0));
+        painter.drawRoundedRect(rect, radius, radius);
+    }
 
     if (m_glowProgress > 0.01 && enabled) {
-        QColor glow = p.pink;
+        QColor glow = m_style == Danger ? p.danger : ThemeManager::accentColors(p).first;
         glow.setAlphaF(0.30 * m_glowProgress);
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(glow, 2.0));

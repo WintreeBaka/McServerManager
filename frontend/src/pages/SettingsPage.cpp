@@ -424,8 +424,10 @@ QWidget *SettingsPage::buildAppearanceCard()
     animationColumn->addLayout(animationHeader);
 
     auto *speedRow = new QHBoxLayout();
+    speedRow->setContentsMargins(8, 2, 2, 2);
     speedRow->setSpacing(10);
     m_speed = new QSlider(Qt::Horizontal, card);
+    m_speed->setMinimumHeight(28);
     m_speed->setRange(50, 200);
     m_speed->setValue(int(AppContext::instance()->animationScale() * 100));
     m_speedLabel = makeLabel(QStringLiteral("标准速度"), QStringLiteral("hint"), card);

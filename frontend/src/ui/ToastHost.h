@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDateTime>
+#include <QSet>
 #include <QWidget>
 
 class QEvent;
@@ -25,9 +26,11 @@ protected:
 
 private:
     void reposition();
+    void dismissToast(QWidget *toast, bool immediate = false);
 
     QVBoxLayout *m_layout = nullptr;
     QVector<QWidget *> m_toasts;
+    QSet<QWidget *> m_dismissing;
     int m_maxVisible = 4;
 
     // last notice, used to collapse the same message arriving twice in one burst

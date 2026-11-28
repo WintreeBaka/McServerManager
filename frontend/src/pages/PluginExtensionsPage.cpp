@@ -261,7 +261,7 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
         canUseUi = canUseUi || grant.toString() == QLatin1String("ui.pages");
     if (plugin.value(QStringLiteral("hasFrontend")).toBool() && eligible && canUseUi) {
         auto *open = new GradientButton(QStringLiteral("打开页面"), row);
-        open->setStyle(GradientButton::Soft);
+        open->setStyle(GradientButton::Outline);
         open->setCompact(true);
         connect(open, &QPushButton::clicked, this, [this, id]() { openPluginPage(id); });
         actions->addWidget(open);
@@ -269,7 +269,7 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
     if (plugin.value(QStringLiteral("hasWeb")).toBool() && eligible
         && !plugin.value(QStringLiteral("webEntry")).toString().isEmpty()) {
         auto *panel = new GradientButton(QStringLiteral("打开面板"), row);
-        panel->setStyle(GradientButton::Soft);
+        panel->setStyle(GradientButton::Outline);
         panel->setCompact(true);
         connect(panel, &QPushButton::clicked, this, [this, plugin]() { openPanel(plugin); });
         actions->addWidget(panel);
@@ -282,7 +282,7 @@ QWidget *PluginExtensionsPage::buildRow(const QJsonObject &plugin)
     });
     actions->addWidget(folder);
     auto *permissions = new GradientButton(QStringLiteral("权限"), row);
-    permissions->setStyle(GradientButton::Soft);
+    permissions->setStyle(GradientButton::Outline);
     permissions->setCompact(true);
     permissions->setEnabled(eligible);
     connect(permissions, &QPushButton::clicked, this,

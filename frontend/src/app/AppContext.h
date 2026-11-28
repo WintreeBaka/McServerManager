@@ -113,6 +113,7 @@ private:
     void applyTheme();
     /// Resolves the backend data root once, without blocking the GUI thread.
     void resolveDataHome();
+    static void applyDialogSurface(QWidget *widget);
     static void applyComboPopupStyle(QApplication *application);
     void loadSettings();
     void saveSettings();

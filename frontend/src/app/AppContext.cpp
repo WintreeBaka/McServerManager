@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDialog>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
@@ -190,8 +191,30 @@ void AppContext::applyTheme()
         application->setPalette(ThemeManager::instance()->qtPalette());
         application->setStyleSheet(ThemeManager::instance()->styleSheet());
         applyComboPopupStyle(application);
+        for (QWidget *widget : application->allWidgets())
+            applyDialogSurface(widget);
     }
     emit themeChanged();
+}
+
+void AppContext::applyDialogSurface(QWidget *widget)
+{
+    auto *dialog = qobject_cast<QDialog *>(widget);
+    if (!dialog)
+        return;
+
+    // A top-level dialog can retain the dark native Windows background even
+    // when the application palette and QSS are light. Apply the surface
+    // explicitly to the dialog itself so custom content cards never sit on a
+    // black strip in light mode.
+    const Palette &p = ThemeManager::instance()->palette();
+    QPalette palette = dialog->palette();
+    palette.setColor(QPalette::Window, p.surface);
+    dialog->setPalette(palette);
+    dialog->setAttribute(Qt::WA_StyledBackground, true);
+    dialog->setAutoFillBackground(true);
+    dialog->setStyleSheet(
+        QStringLiteral("QDialog { background-color: %1; }").arg(p.surface.name()));
 }
 
 void AppContext::applyComboPopupStyle(QApplication *application)
@@ -229,6 +252,8 @@ void AppContext::applyComboPopupStyle(QApplication *application)
 bool AppContext::eventFilter(QObject *watched, QEvent *event)
 {
     if (event->type() == QEvent::Polish || event->type() == QEvent::Show) {
+        if (auto *widget = qobject_cast<QWidget *>(watched))
+            applyDialogSurface(widget);
         if (auto *combo = qobject_cast<QComboBox *>(watched)) {
             const Palette &p = ThemeManager::instance()->palette();
             const QString popupStyle =

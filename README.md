@@ -80,22 +80,22 @@
 - 暗黑 / 亮色主题，可切换**粉色**与**蓝色**两种纯色配色风格
 - 所有过渡动画使用贝塞尔曲线缓动，速度可调（或整体关闭）
 - 内置多种字体预设（HarmonyOS Sans SC / Noto Sans SC / 思源黑体 / 微软雅黑 UI / 等线），也可选用系统里的任意字体
-- 无边框窗口、自定义标题栏、平滑页面切换、Toast 提醒
+- 无边框窗口、自定义标题栏、平滑页面切换；Toast 通知支持展开、上移和收缩动效
 - 设置页左侧菜单固定尺寸：实验性功能开关与「返回主页」始终贴在窗口底部，内容再长也不会被滚走
 
 ## 界面截图
 
-| 总览（暗黑 + 渐变） | 服务器详情与日志 |
+| 总览（亮色） | 服务器详情与日志 |
 | --- | --- |
-| ![总览](docs/screenshots/dashboard-dark.png) | ![服务器](docs/screenshots/servers-dark.png) |
+| ![总览](docs/screenshots/dashboard-light.png) | ![服务器](docs/screenshots/servers-light.png) |
 
 | 配置文件（快捷 / 专家） | 备份与定时计划 |
 | --- | --- |
-| ![配置](docs/screenshots/config-dark.png) | ![备份](docs/screenshots/backup-dark.png) |
+| ![配置](docs/screenshots/config-light.png) | ![备份](docs/screenshots/backup-light.png) |
 
-| 设置（亮色，独立左菜单） | 旧版纯色风格截图 |
+| 设置（亮色） | 插件管理 |
 | --- | --- |
-| ![设置](docs/screenshots/settings-light.png) | ![纯色](docs/screenshots/flat-light.png) |
+| ![设置](docs/screenshots/settings-light.png) | ![插件管理](docs/screenshots/plugin-extensions-light.png) |
 
 ## 快速开始
 
@@ -198,7 +198,7 @@ mcsm-cli plugin service start --name com.example.ops-console     # 启动插件�
 | [`docs/PLUGIN-SDK.md`](docs/PLUGIN-SDK.md) | **管理器插件接口**：包结构、`plugin.json` 全字段、前端 `mcsm.*` API、后端 JSON-Line 钩子与启动补丁、Web 面板、权限与调试 |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | 常见问题与排查方法 |
 | [`docs/SCRIPT-EXECUTION-POLICY.md`](docs/SCRIPT-EXECUTION-POLICY.md) | PowerShell 脚本执行策略与安全建议 |
-| [`assets/icon/README.md`](assets/icon/README.md) | 1.3.1 应用图标预留位置与加载规则 |
+| [`assets/icon/README.md`](assets/icon/README.md) | 应用图标位置、替换方式与发行包加载规则 |
 | [`examples/plugins/`](examples/plugins) | 三个可直接安装的示例插件（前端 / 后端 / 全局）+ 打包脚本 |
 | [`packaging/QUICKSTART.txt`](packaging/QUICKSTART.txt) | 面向最终用户的上手说明（随发行包分发） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本记录 |
